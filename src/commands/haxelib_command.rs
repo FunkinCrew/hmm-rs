@@ -23,6 +23,7 @@ pub fn install_haxelib(
         haxelib_type: HaxelibType::Haxelib,
         vcs_ref: None,
         dir: None,
+        path: None,
         url: None,
         version: None,
     };

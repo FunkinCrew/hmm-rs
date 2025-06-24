@@ -1,0 +1,10 @@
+{
+  "dependencies": [
+    {
+      "name": "FlxPartialSound",
+      "type": "dev",
+      "dir": null,
+      "path": "../FlxPartialSound"
+    }
+  ]
+}
