@@ -169,27 +169,42 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus> {
                 Err(_) => Prefix::from_hex(haxelib.vcs_ref.as_ref().unwrap())?,
             };
 
-            if head_ref
+            let is_wrong_commit = head_ref
                 .id()
                 .shorten_or_id()
                 .cmp_oid(intended_commit.as_oid())
-                .is_ne()
-            {
-                return Ok(HaxelibStatus::new(
-                    haxelib,
-                    InstallType::Outdated,
-                    get_wants(haxelib),
-                    Some(head_ref.id().to_string()),
-                ));
-            }
+                .is_ne();
+            
+            let has_local_changes = repo.is_dirty()?;
 
-            if repo.is_dirty()? {
-                return Ok(HaxelibStatus::new(
-                    haxelib,
-                    InstallType::Conflict,
-                    get_wants(haxelib),
-                    None,
-                ));
+            match (is_wrong_commit, has_local_changes) {
+                (true, true) => {
+                    return Ok(HaxelibStatus::new(
+                        haxelib,
+                        InstallType::Conflict,
+                        get_wants(haxelib),
+                        Some(format!("{} (wrong commit + local changes)", head_ref.id().to_string())),
+                    ));
+                }
+                (true, false) => {
+                    return Ok(HaxelibStatus::new(
+                        haxelib,
+                        InstallType::Outdated,
+                        get_wants(haxelib),
+                        Some(format!("{} (wrong commit)", head_ref.id().to_string())),
+                    ));
+                }
+                (false, true) => {
+                    return Ok(HaxelibStatus::new(
+                        haxelib,
+                        InstallType::Conflict,
+                        get_wants(haxelib),
+                        Some(format!("{} (local changes)", head_ref.id().to_string())),
+                    ));
+                }
+                (false, false) => {
+                    // Continue to the end of the function - correct version
+                }
             }
 
             // we have a correct version, so we're going to update the current_version to to the vcs_ref
@@ -260,8 +275,14 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             println!(
                 "{} {}",
                 haxelib_status.lib.name.red().bold(),
-                "has local changes".red()
+                "has issues".red()
             );
+            if let Some(details) = &haxelib_status.installed {
+                println!("Current: {}", details.red());
+            }
+            if let Some(expected) = &haxelib_status.wants {
+                println!("Expected: {}", expected.red());
+            }
         }
         InstallType::NotLocked => {
             println!(
