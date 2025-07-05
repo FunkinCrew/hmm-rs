@@ -57,7 +57,11 @@ impl Dependancies {
         );
 
         match lib.haxelib_type {
-            HaxelibType::Git => if let Some(u) = &lib.url { haxelib_output.push_str(&format!("url: {}\n", u)) },
+            HaxelibType::Git => {
+                if let Some(u) = &lib.url {
+                    haxelib_output.push_str(&format!("url: {}\n", u))
+                }
+            }
             HaxelibType::Haxelib => {
                 let haxelib_url = format!("https://lib.haxe.org/p/{}", lib.name);
                 haxelib_output.push_str(&format!("url: {}\n", haxelib_url))

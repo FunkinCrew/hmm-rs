@@ -90,9 +90,12 @@ pub fn run() -> Result<()> {
             commands::haxelib_command::install_haxelib(&name, &version, load_deps()?, path)?
         }
         Commands::Remove { lib: _ } => commands::remove_command::remove_haxelibs()?,
-        Commands::Dev { name, path } => {
-            commands::dev_command::add_dev_dependency(&name, &path, load_deps()?, args.json.unwrap())?
-        }
+        Commands::Dev { name, path } => commands::dev_command::add_dev_dependency(
+            &name,
+            &path,
+            load_deps()?,
+            args.json.unwrap(),
+        )?,
     }
     Ok(())
 }

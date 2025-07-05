@@ -14,7 +14,9 @@ pub fn dump_to_hxml(deps: &Dependancies, hxml_out: Option<PathBuf>) -> Result<()
             HaxelibType::Git => {
                 lib_string
                     .push_str(format!(":git:{}", &haxelib.url.as_ref().unwrap().as_str()).as_str());
-                if let Some(r) = &haxelib.vcs_ref { lib_string.push_str(format!("#{}", r).as_str()) }
+                if let Some(r) = &haxelib.vcs_ref {
+                    lib_string.push_str(format!("#{}", r).as_str())
+                }
             }
             HaxelibType::Haxelib => lib_string
                 .push_str(format!(":{}", haxelib.version.as_ref().unwrap().as_str()).as_str()),

@@ -1,8 +1,8 @@
 use std::{fs::File, path::Path};
 
 use crate::hmm::dependencies::Dependancies;
-use crate::hmm::haxelib::{self, Haxelib, HaxelibType};
-use anyhow::{anyhow, Context, Result};
+use crate::hmm::haxelib::{Haxelib, HaxelibType};
+use anyhow::Result;
 use console::Emoji;
 use gix::hash::Prefix;
 use std::io::Read;
@@ -174,7 +174,7 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus> {
                 .shorten_or_id()
                 .cmp_oid(intended_commit.as_oid())
                 .is_ne();
-            
+
             let has_local_changes = repo.is_dirty()?;
 
             match (is_wrong_commit, has_local_changes) {
@@ -183,7 +183,10 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus> {
                         haxelib,
                         InstallType::Conflict,
                         get_wants(haxelib),
-                        Some(format!("{} (wrong commit + local changes)", head_ref.id().to_string())),
+                        Some(format!(
+                            "{} (wrong commit + local changes)",
+                            head_ref.id().to_string()
+                        )),
                     ));
                 }
                 (true, false) => {

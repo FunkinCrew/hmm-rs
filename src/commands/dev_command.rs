@@ -4,12 +4,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::{
-    hmm::{
-        self,
-        dependencies::Dependancies,
-        haxelib::{Haxelib, HaxelibType},
-    },
+use crate::hmm::{
+    self,
+    dependencies::Dependancies,
+    haxelib::{Haxelib, HaxelibType},
 };
 
 pub fn add_dev_dependency(
@@ -20,7 +18,7 @@ pub fn add_dev_dependency(
 ) -> Result<()> {
     // Convert to absolute path
     let absolute_path = Path::new(path).canonicalize()?;
-    
+
     let dev_haxelib = Haxelib {
         name: name.to_string(),
         haxelib_type: HaxelibType::Dev,

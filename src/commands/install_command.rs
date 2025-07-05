@@ -11,7 +11,6 @@ use gix::clone;
 use gix::create;
 use gix::progress::Discard;
 use gix::Url;
-use human_bytes::human_bytes;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
 use std::fs::File;
