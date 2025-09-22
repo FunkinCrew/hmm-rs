@@ -325,6 +325,7 @@ mod tests {
             dir: None,
             url: None,
             version: Some("1.0.0".to_string()),
+            path: None,
         };
         assert_eq!(get_wants(&haxelib), Some("1.0.0".to_string()));
 
@@ -335,6 +336,7 @@ mod tests {
             dir: None,
             url: None,
             version: None,
+            path: None,
         };
         assert_eq!(get_wants(&haxelib), Some("master".to_string()));
     }
