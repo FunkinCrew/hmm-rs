@@ -55,5 +55,5 @@ The below is a broad todo list / notes for myself.
   - create the .rs file
   - Remove the library from `hmm.json`
   - Remove the directory from `.haxelib` folder
-- [ ] lock
+- [x] lock
   - how much depth should this go to for dependencies?

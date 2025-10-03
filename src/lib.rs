@@ -76,6 +76,10 @@ enum Commands {
         #[command(subcommand)]
         subcommand: Option<LockCommands>,
 
+        /// Use full commit IDs instead of shortened ones for git repositories
+        #[arg(short = 'l', long = "long-id")]
+        long_id: bool,
+
         /// Specific libraries you want to lock, can be multiple
         /// `hmm-rs lock lime openfl` will lock lime and openfl
         #[arg(value_name = "LIBS")]
@@ -112,11 +116,18 @@ pub fn run() -> Result<()> {
             load_deps()?,
             args.json.clone().unwrap(),
         )?,
-        Commands::Lock { subcommand, lib } => match subcommand {
+        Commands::Lock {
+            subcommand,
+            long_id,
+            lib,
+        } => match subcommand {
             Some(LockCommands::Check) => commands::lock_command::check_locked(&load_deps()?)?,
-            None => {
-                commands::lock_command::lock_dependencies(&load_deps()?, &lib, args.json.unwrap())?
-            }
+            None => commands::lock_command::lock_dependencies(
+                &load_deps()?,
+                &lib,
+                args.json.unwrap(),
+                long_id,
+            )?,
         },
     }
     Ok(())
