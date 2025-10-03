@@ -3,7 +3,6 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
-use console::Emoji;
 use yansi::Paint;
 
 use crate::hmm::dependencies::Dependancies;
@@ -193,12 +192,7 @@ pub fn check_locked(deps: &Dependancies) -> Result<()> {
     for lib in deps.dependencies.iter() {
         match is_locked(lib) {
             LockStatus::Locked => {
-                println!(
-                    "{} {} is locked {}",
-                    lib.name.green().bold(),
-                    format!("[{:?}]", lib.haxelib_type).green().dim(),
-                    Emoji("✅", "[✔️]")
-                );
+                // Don't print anything for locked dependencies
                 locked_count += 1;
             }
             LockStatus::NotLocked(reason) => {
@@ -211,12 +205,7 @@ pub fn check_locked(deps: &Dependancies) -> Result<()> {
                 unlocked_libs.push(&lib.name);
             }
             LockStatus::NotApplicable => {
-                println!(
-                    "{} {} (dev dependency - always locked by path) {}",
-                    lib.name.cyan().bold(),
-                    format!("[{:?}]", lib.haxelib_type).cyan().dim(),
-                    Emoji("✅", "[✔️]")
-                );
+                // Don't print anything for dev dependencies
                 locked_count += 1;
             }
         }
