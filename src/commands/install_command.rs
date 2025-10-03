@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use gix::clone;
 use gix::create;
 use gix::progress::Discard;
-use gix::Url;
+use gix::Url as GixUrl;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
 use std::fs::File;
@@ -78,7 +78,7 @@ pub fn install_from_git_using_gix_clone(haxelib: &Haxelib) -> Result<()> {
 
     let path_with_no_https = haxelib_url.replace("https://", "");
 
-    let clone_url = Url::from_parts(
+    let clone_url = GixUrl::from_parts(
         gix::url::Scheme::Https,
         None,
         None,
@@ -139,13 +139,7 @@ pub fn install_from_git_using_gix_clone(haxelib: &Haxelib) -> Result<()> {
 
 #[tokio::main]
 pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
-    // braindead...
-    let mut target_url = String::from("https://lib.haxe.org/p/");
-    target_url.push_str(haxelib.name.as_str());
-    target_url.push('/');
-    target_url.push_str(haxelib.version.as_ref().unwrap().as_str());
-    target_url.push('/');
-    target_url.push_str("download");
+    let target_url = haxelib.download_url()?;
 
     println!(
         "Downloading: {} - {} - {}",
@@ -155,43 +149,60 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
     );
 
     let client = reqwest::Client::new();
-
-    let tmp_dir = env::temp_dir().join(format!("{}.zip", haxelib.name));
-
     let response = client.get(target_url).send().await?;
-    let total_size = response.content_length().unwrap();
-    // yoinked from haxeget !
-    let pb = ProgressBar::new(total_size);
+
+    if !response.status().is_success() {
+        return Err(anyhow!("Failed to download: HTTP {}", response.status()));
+    }
+
+    let total_size = response
+        .content_length()
+        .ok_or_else(|| anyhow!("Server didn't provide content length"))?;
+
+    let pb: ProgressBar = ProgressBar::new(total_size);
     pb.set_style(ProgressStyle::with_template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.yellow/red}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
              .unwrap());
 
-    let mut file = File::create(tmp_dir.as_path())?;
-    let mut downloaded: u64 = 0;
-    let mut stream = response.bytes_stream();
+    let tmp_dir = env::temp_dir().join(format!("{}.zip", haxelib.name));
 
-    while let Some(item) = stream.next().await {
-        let chunk = item?;
-        file.write_all(&chunk)?;
-        let new = std::cmp::min(downloaded + (chunk.len() as u64), total_size);
-        downloaded = new;
-        pb.set_position(new);
-    }
+    let _ = {
+        let mut file = File::create(&tmp_dir)?;
+        let mut downloaded: u64 = 0;
+        let mut stream = response.bytes_stream();
+
+        while let Some(item) = stream.next().await {
+            let chunk = item?;
+            file.write_all(&chunk)?;
+            let new = std::cmp::min(downloaded + (chunk.len() as u64), total_size);
+            downloaded = new;
+            pb.set_position(new);
+        }
+
+        file.flush()?;
+        downloaded
+    };
 
     let finish_message = format!(
         "{}: {} done downloading from {}",
         haxelib.name.green().bold(),
-        haxelib.version.as_ref().unwrap().bright_green(),
+        haxelib.version().bright_green(),
         "Haxelib".yellow().bold()
     );
     pb.finish_with_message(finish_message);
 
-    let version_as_commas = haxelib.version.as_ref().unwrap().replace(".", ",");
-    let mut output_dir: PathBuf = [".haxelib", haxelib.name.as_str()].iter().collect();
+    let metadata = std::fs::metadata(&tmp_dir)?;
+    if metadata.len() != total_size {
+        return Err(anyhow!(
+            "Download incomplete: expected {} bytes, got {} bytes",
+            total_size,
+            metadata.len()
+        ));
+    }
+
+    let output_dir: PathBuf = [".haxelib", haxelib.name.as_str()].iter().collect();
 
     if let Err(e) = std::fs::create_dir(&output_dir) {
-        if e.kind() == std::io::ErrorKind::AlreadyExists {
-            println!("Directory already exists: {:?}", output_dir.as_path());
-        } else {
+        if e.kind() != std::io::ErrorKind::AlreadyExists {
             return Err(anyhow!(
                 "Error creating directory: {:?}",
                 output_dir.as_path()
@@ -199,23 +210,29 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
         }
     }
 
-    create_current_file(&output_dir, haxelib.version.as_ref().unwrap())?;
+    create_current_file(&output_dir, &String::from(haxelib.version()))?;
 
     // unzipping
-    output_dir = output_dir.join(version_as_commas.as_str());
+    let unzipped_output_dir = output_dir.join(haxelib.version_as_commas());
 
-    let archive = File::open(tmp_dir.as_path())?;
-    let mut zip_file = ZipArchive::new(archive).context("Error opening zip file")?;
+    let archive =
+        File::open(&tmp_dir).context(format!("Failed to open downloaded zip: {:?}", tmp_dir))?;
+
+    let mut zip_file =
+        ZipArchive::new(archive).context("Error opening zip file - file may be corrupted")?;
+
     zip_file
-        .extract(output_dir.as_path())
+        .extract(&unzipped_output_dir)
         .context("Error extracting zip file")?;
 
-    std::fs::remove_file(tmp_dir.as_path())?;
+    std::fs::remove_file(&tmp_dir)?;
+
+    // print empty line for readability
     println!();
     println!(
         "{}: {} installed {}",
         haxelib.name.green().bold(),
-        haxelib.version.as_ref().unwrap().bright_green(),
+        haxelib.version().bright_green(),
         Emoji("✅", "[✔️]")
     );
     // print an empty line, for readability between downloads
@@ -254,7 +271,7 @@ pub fn install_from_git_using_gix_checkout(haxelib: &Haxelib) -> Result<()> {
     println!(
         "{}: {} updated {}",
         haxelib.name.green().bold(),
-        haxelib.vcs_ref.as_ref().unwrap().bright_green(),
+        haxelib.vcs_ref().bright_green(),
         Emoji("✅", "[✔️]")
     );
 
