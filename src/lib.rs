@@ -71,6 +71,22 @@ enum Commands {
         /// The file system path (absolute or relative)
         path: String,
     },
+    /// Locks dependencies to their currently installed versions
+    Lock {
+        #[command(subcommand)]
+        subcommand: Option<LockCommands>,
+
+        /// Specific libraries you want to lock, can be multiple
+        /// `hmm-rs lock lime openfl` will lock lime and openfl
+        #[arg(value_name = "LIBS")]
+        lib: Option<Vec<String>>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum LockCommands {
+    /// Check if all dependencies are locked to specific versions
+    Check,
 }
 
 pub fn run() -> Result<()> {
@@ -94,8 +110,14 @@ pub fn run() -> Result<()> {
             &name,
             &path,
             load_deps()?,
-            args.json.unwrap(),
+            args.json.clone().unwrap(),
         )?,
+        Commands::Lock { subcommand, lib } => match subcommand {
+            Some(LockCommands::Check) => commands::lock_command::check_locked(&load_deps()?)?,
+            None => {
+                commands::lock_command::lock_dependencies(&load_deps()?, &lib, args.json.unwrap())?
+            }
+        },
     }
     Ok(())
 }
