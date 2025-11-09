@@ -12,6 +12,7 @@ use gix::create;
 use gix::progress::Discard;
 use gix::Url as GixUrl;
 use indicatif::{ProgressBar, ProgressStyle};
+use reqwest::Client as ReqwestClient;
 use std::env;
 use std::fs::File;
 use std::io::Write;
@@ -139,27 +140,27 @@ pub fn install_from_git_using_gix_clone(haxelib: &Haxelib) -> Result<()> {
 
 #[tokio::main]
 pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
-    let target_url = haxelib.download_url()?;
-
     println!(
         "Downloading: {} - {} - {}",
         haxelib.name.bold(),
         "lib.haxe.org".yellow().bold(),
-        target_url.bold()
+        haxelib.download_url()?.bold()
     );
 
-    let client = reqwest::Client::new();
-    let response = client.get(target_url).send().await?;
+    let response = ReqwestClient::new()
+        .get(haxelib.download_url()?)
+        .send()
+        .await?;
 
     if !response.status().is_success() {
         return Err(anyhow!("Failed to download: HTTP {}", response.status()));
     }
 
-    let total_size = response
+    let expected_total_size = response
         .content_length()
         .ok_or_else(|| anyhow!("Server didn't provide content length"))?;
 
-    let pb: ProgressBar = ProgressBar::new(total_size);
+    let pb: ProgressBar = ProgressBar::new(expected_total_size);
     pb.set_style(ProgressStyle::with_template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.yellow/red}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
              .unwrap());
 
@@ -173,7 +174,7 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
         while let Some(item) = stream.next().await {
             let chunk = item?;
             file.write_all(&chunk)?;
-            let new = std::cmp::min(downloaded + (chunk.len() as u64), total_size);
+            let new = std::cmp::min(downloaded + (chunk.len() as u64), expected_total_size);
             downloaded = new;
             pb.set_position(new);
         }
@@ -191,10 +192,10 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
     pb.finish_with_message(finish_message);
 
     let metadata = std::fs::metadata(&tmp_dir)?;
-    if metadata.len() != total_size {
+    if metadata.len() != expected_total_size {
         return Err(anyhow!(
             "Download incomplete: expected {} bytes, got {} bytes",
-            total_size,
+            expected_total_size,
             metadata.len()
         ));
     }
@@ -227,16 +228,7 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
 
     std::fs::remove_file(&tmp_dir)?;
 
-    // print empty line for readability
-    println!();
-    println!(
-        "{}: {} installed {}",
-        haxelib.name.green().bold(),
-        haxelib.version().bright_green(),
-        Emoji("✅", "[✔️]")
-    );
-    // print an empty line, for readability between downloads
-    println!();
+    print_success(haxelib)?;
     Ok(())
 }
 
@@ -268,13 +260,7 @@ pub fn install_from_git_using_gix_checkout(haxelib: &Haxelib) -> Result<()> {
 
     do_commit_checkout(&repo, haxelib)?;
 
-    println!(
-        "{}: {} updated {}",
-        haxelib.name.green().bold(),
-        haxelib.vcs_ref().bright_green(),
-        Emoji("✅", "[✔️]")
-    );
-
+    print_success(haxelib)?;
     Ok(())
 }
 
@@ -292,6 +278,20 @@ fn do_commit_checkout(repo: &gix::Repository, haxelib: &Haxelib) -> Result<()> {
             .set_target_id(target_gix_ref, reflog_msg)?;
     }
 
+    Ok(())
+}
+
+fn print_success(haxelib: &Haxelib) -> Result<()> {
+    // print empty line for readability
+    println!();
+    println!(
+        "{}: {} installed {}",
+        haxelib.name.green().bold(),
+        haxelib.version_or_ref()?.bright_green(),
+        Emoji("✅", "[✔️]")
+    );
+    // print an empty line, for readability between downloads
+    println!();
     Ok(())
 }
 

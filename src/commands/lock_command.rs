@@ -123,9 +123,7 @@ fn lock_dependency(lib: &mut Haxelib, long_id: bool) -> Result<LockResult> {
 fn lock_haxelib_dependency(lib: &mut Haxelib) -> Result<LockResult> {
     // Check if already locked
     if lib.version.is_some() {
-        return Ok(LockResult::AlreadyLocked(
-            lib.version.as_ref().unwrap().clone(),
-        ));
+        return Ok(LockResult::AlreadyLocked(String::from(lib.version())));
     }
 
     // Read the .current file to get installed version
@@ -220,7 +218,10 @@ pub fn check_locked(deps: &Dependancies) -> Result<()> {
 
     if !unlocked_libs.is_empty() {
         println!();
-        println!("Run {} to lock all dependencies", "hmm lock".yellow().bold());
+        println!(
+            "Run {} to lock all dependencies",
+            "hmm lock".yellow().bold()
+        );
         return Err(anyhow!(
             "{} dependencies are not locked",
             unlocked_libs.len()
