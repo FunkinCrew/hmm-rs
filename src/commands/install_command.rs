@@ -72,12 +72,7 @@ pub fn handle_install(haxelib_status: &HaxelibStatus) -> Result<()> {
 pub fn install_from_git_using_gix_clone(haxelib: &Haxelib) -> Result<()> {
     println!("Installing {} from git using clone", haxelib.name);
 
-    let haxelib_url = haxelib
-        .url
-        .as_ref()
-        .ok_or(anyhow!("No url provided for {}", haxelib.name))?;
-
-    let path_with_no_https = haxelib_url.replace("https://", "");
+    let path_with_no_https = haxelib.url().replace("https://", "");
 
     let clone_url = GixUrl::from_parts(
         gix::url::Scheme::Https,
@@ -88,7 +83,7 @@ pub fn install_from_git_using_gix_clone(haxelib: &Haxelib) -> Result<()> {
         BString::from(path_with_no_https),
         false,
     )
-    .context(format!("error creating gix url for {}", haxelib_url))?;
+    .context(format!("error creating gix url for {}", haxelib.url()))?;
 
     let mut clone_path = PathBuf::from(".haxelib").join(&haxelib.name);
 
@@ -211,17 +206,16 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
         }
     }
 
-    create_current_file(&output_dir, &String::from(haxelib.version()))?;
+    create_current_file(&output_dir, &haxelib.version().to_string())?;
 
     // unzipping
-    let unzipped_output_dir = output_dir.join(haxelib.version_as_commas());
-
     let archive =
         File::open(&tmp_dir).context(format!("Failed to open downloaded zip: {:?}", tmp_dir))?;
 
     let mut zip_file =
         ZipArchive::new(archive).context("Error opening zip file - file may be corrupted")?;
 
+    let unzipped_output_dir = output_dir.join(haxelib.version_as_commas());
     zip_file
         .extract(&unzipped_output_dir)
         .context("Error extracting zip file")?;
