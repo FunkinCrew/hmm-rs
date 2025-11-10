@@ -1,3 +1,4 @@
+pub mod add_command;
 pub mod check_command;
 pub mod clean_command;
 pub mod dev_command;

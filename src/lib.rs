@@ -5,8 +5,10 @@ use std::path::PathBuf;
 
 use anyhow::{Ok, Result};
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use shadow_rs::shadow;
+
+use crate::commands::add_command;
 
 shadow!(build);
 
@@ -17,9 +19,8 @@ struct Cli {
     #[command(subcommand)]
     cmd: Commands,
 
-    /// Sets a custom hmm.json file to use
-    #[arg(short, long, value_name = "JSON", default_value = "hmm.json")]
-    json: Option<PathBuf>,
+    #[command(flatten)]
+    global_opts: GlobalOpts,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -50,6 +51,7 @@ enum Commands {
     /// Installs the dependencies from hmm.json, if they aren't already installed.
     #[command(visible_alias = "i")]
     Install,
+    Add(AddArgs),
     /// Installs a haxelib from lib.haxe.org
     Haxelib {
         /// The name of the haxelib to install
@@ -97,6 +99,37 @@ enum Commands {
     },
 }
 
+#[derive(Debug, Args, Clone)]
+pub struct AddArgs {
+    name: String,
+    #[arg(long, value_name = "URL")]
+    git: Option<String>,
+    /// Optional git ref (branch, tag, or commit SHA). If not specified, uses default branch when used with the --git flag
+    #[arg(value_name = "REF")]
+    git_ref: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct GlobalOpts {
+    /// Color
+    #[arg(long, value_enum, global = true, default_value_t = Color::Auto)]
+    color: Color,
+    /// Sets a custom hmm.json file to use
+    #[arg(short, long, value_name = "JSON", default_value = "hmm.json")]
+    json: Option<PathBuf>,
+    /// Verbosity level (can be specified multiple times, -v or -vvvv)
+    #[arg(long, short, global = true, action = clap::ArgAction::Count)]
+    verbose: u8,
+    //... other global options
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum Color {
+    Always,
+    Auto,
+    Never,
+}
+
 #[derive(Subcommand, Debug, Clone)]
 enum LockCommands {
     /// Check if all dependencies are locked to specific versions
@@ -106,10 +139,11 @@ enum LockCommands {
 pub fn run() -> Result<()> {
     let args = Cli::parse();
 
-    let path = args.json.clone().unwrap();
+    let path = args.global_opts.json.clone().unwrap();
     let load_deps = || hmm::json::read_json(&path);
 
     match args.cmd {
+        Commands::Add(add_args) => add_command::add_dependency(add_args, load_deps()?, path)?,
         Commands::List { lib } => hmm::json::read_json(&path)?.print_string_list(&lib)?,
         Commands::Init => commands::init_command::init_hmm()?,
         Commands::Clean => commands::clean_command::remove_haxelib_folder()?,
@@ -127,7 +161,7 @@ pub fn run() -> Result<()> {
             &name,
             &path,
             load_deps()?,
-            args.json.clone().unwrap(),
+            args.global_opts.json.clone().unwrap(),
         )?,
         Commands::Lock {
             subcommand,
@@ -138,7 +172,7 @@ pub fn run() -> Result<()> {
             None => commands::lock_command::lock_dependencies(
                 &load_deps()?,
                 &lib,
-                args.json.unwrap(),
+                args.global_opts.json.unwrap(),
                 long_id,
             )?,
         },
