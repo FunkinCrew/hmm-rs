@@ -1,6 +1,7 @@
 pub mod check_command;
 pub mod clean_command;
 pub mod dev_command;
+pub mod git_command;
 pub mod haxelib_command;
 pub mod init_command;
 pub mod install_command;

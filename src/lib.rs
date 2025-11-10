@@ -57,6 +57,16 @@ enum Commands {
         /// The version of the haxelib to install
         version: Option<String>,
     },
+    /// Installs a library from a git repository
+    Git {
+        /// The name of the library
+        name: String,
+        /// The git repository URL (e.g., https://github.com/user/repo)
+        url: String,
+        /// Optional git ref (branch, tag, or commit SHA). If not specified, uses default branch
+        #[arg(value_name = "REF")]
+        git_ref: Option<String>,
+    },
     /// Removes one or more library dependencies from `hmm.json` and the `.haxelib/` folder
     #[command(visible_alias = "rm")]
     Remove {
@@ -108,6 +118,9 @@ pub fn run() -> Result<()> {
         Commands::Install => commands::install_command::install_from_hmm(&load_deps()?)?,
         Commands::Haxelib { name, version } => {
             commands::haxelib_command::install_haxelib(&name, &version, load_deps()?, path)?
+        }
+        Commands::Git { name, url, git_ref } => {
+            commands::git_command::install_git(&name, &url, &git_ref, load_deps()?, path)?
         }
         Commands::Remove { lib: _ } => commands::remove_command::remove_haxelibs()?,
         Commands::Dev { name, path } => commands::dev_command::add_dev_dependency(
