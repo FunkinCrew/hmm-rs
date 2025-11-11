@@ -19,12 +19,6 @@
       "ref": "v4.3.68",
       "dir": null,
       "url": "https://github.com/HaxeFoundation/hxcpp"
-    },
-    {
-      "name": "epic",
-      "type": "dev",
-      "dir": null,
-      "path": "../../../FlxPartialSound/"
     }
   ]
 }
