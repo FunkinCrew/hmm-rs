@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::io::Write;
 use std::str::FromStr;
 use std::{fs::File, path::PathBuf};
@@ -7,7 +8,16 @@ use anyhow::{Context, Result};
 
 pub fn save_json(deps: Dependancies, path: PathBuf) -> Result<()> {
     println!("{} saved/updated", path.display());
-    let j = serde_json::to_string_pretty(&deps)?;
+    let mut dep_output = deps.clone();
+    dep_output.dependencies.sort_by(|a, b| {
+        let name_cmp = a.name.to_lowercase().cmp(&b.name.to_lowercase());
+        if name_cmp != std::cmp::Ordering::Equal {
+            return name_cmp;
+        }
+        // Stable secondary key: id ascending
+        Ordering::Equal
+    });
+    let j = serde_json::to_string_pretty(&dep_output)?;
     let mut file = File::create(path)?;
     file.write_all(j.as_bytes())?;
     Ok(())
