@@ -84,7 +84,7 @@ fn detect_current_git_ref(name: &str) -> Result<String> {
 
     // Try to get the current branch name
     let branch_output = std::process::Command::new("git")
-        .args(&["-C", &repo_path, "rev-parse", "--abbrev-ref", "HEAD"])
+        .args(["-C", &repo_path, "rev-parse", "--abbrev-ref", "HEAD"])
         .output()?;
 
     if branch_output.status.success() {
@@ -95,7 +95,7 @@ fn detect_current_git_ref(name: &str) -> Result<String> {
         // If we're in detached HEAD state, get the commit SHA
         if branch == "HEAD" {
             let commit_output = std::process::Command::new("git")
-                .args(&["-C", &repo_path, "rev-parse", "HEAD"])
+                .args(["-C", &repo_path, "rev-parse", "HEAD"])
                 .output()?;
 
             if commit_output.status.success() {
@@ -111,7 +111,7 @@ fn detect_current_git_ref(name: &str) -> Result<String> {
 
     // Fallback: just get the commit SHA
     let commit_output = std::process::Command::new("git")
-        .args(&["-C", &repo_path, "rev-parse", "HEAD"])
+        .args(["-C", &repo_path, "rev-parse", "HEAD"])
         .output()?;
 
     if commit_output.status.success() {

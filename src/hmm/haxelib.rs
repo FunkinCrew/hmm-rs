@@ -20,24 +20,20 @@ pub struct Haxelib {
 
 impl Haxelib {
     pub fn version(&self) -> &str {
-        self.version.as_deref().expect(&format!(
-            "{}: version field is required for Haxelib
+        self.version.as_deref().unwrap_or_else(|| panic!("{}: version field is required for Haxelib
   type",
-            self.name
-        ))
+            self.name))
     }
 
     pub fn vcs_ref(&self) -> &str {
-        self.vcs_ref.as_deref().expect(&format!(
-            "{}: vcs_ref field is required for Git type",
-            self.name
-        ))
+        self.vcs_ref.as_deref().unwrap_or_else(|| panic!("{}: vcs_ref field is required for Git type",
+            self.name))
     }
 
     pub fn url(&self) -> &str {
         self.url
             .as_deref()
-            .expect(&format!("{}: url field is required", self.name))
+            .unwrap_or_else(|| panic!("{}: url field is required", self.name))
     }
 
     pub fn try_version(&self) -> Option<&str> {

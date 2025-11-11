@@ -185,7 +185,7 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus> {
                         get_wants(haxelib),
                         Some(format!(
                             "{} (wrong commit + local changes)",
-                            head_ref.id().to_string()
+                            head_ref.id()
                         )),
                     ));
                 }
@@ -194,7 +194,7 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus> {
                         haxelib,
                         InstallType::Outdated,
                         get_wants(haxelib),
-                        Some(format!("{} (wrong commit)", head_ref.id().to_string())),
+                        Some(format!("{} (wrong commit)", head_ref.id())),
                     ));
                 }
                 (false, true) => {
@@ -202,7 +202,7 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus> {
                         haxelib,
                         InstallType::Conflict,
                         get_wants(haxelib),
-                        Some(format!("{} (local changes)", head_ref.id().to_string())),
+                        Some(format!("{} (local changes)", head_ref.id())),
                     ));
                 }
                 (false, false) => {
