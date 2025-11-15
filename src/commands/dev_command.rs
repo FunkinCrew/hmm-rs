@@ -36,7 +36,7 @@ pub fn add_dev_dependency(
     }
 
     // Create the library directory inside .haxelib
-    let lib_dir = haxelib_dir.join(name);
+    let lib_dir = haxelib_dir.join(name.replace(".", ","));
     if !lib_dir.exists() {
         fs::create_dir_all(&lib_dir)?;
     }

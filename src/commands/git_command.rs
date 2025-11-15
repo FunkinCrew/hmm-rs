@@ -80,7 +80,7 @@ pub fn install_git(
 
 /// Detect the current git ref (branch/tag/commit) after cloning
 fn detect_current_git_ref(name: &str) -> Result<String> {
-    let repo_path = format!(".haxelib/{}/git", name);
+    let repo_path = format!(".haxelib/{}/git", name.replace(".", ","));
 
     // Try to get the current branch name
     let branch_output = std::process::Command::new("git")

@@ -127,7 +127,7 @@ fn lock_haxelib_dependency(lib: &mut Haxelib) -> Result<LockResult> {
     }
 
     // Read the .current file to get installed version
-    let lib_path = get_lib_path(&lib.name);
+    let lib_path = Path::new(".haxelib").join(lib.name_as_commas());
     let current_file = lib_path.join(".current");
 
     if !current_file.exists() {
@@ -146,7 +146,7 @@ fn lock_haxelib_dependency(lib: &mut Haxelib) -> Result<LockResult> {
 }
 
 fn lock_git_dependency(lib: &mut Haxelib, long_id: bool) -> Result<LockResult> {
-    let lib_path = get_lib_path(&lib.name);
+    let lib_path = Path::new(".haxelib").join(lib.name_as_commas());
     let git_path = lib_path.join("git");
 
     if !git_path.exists() {
@@ -176,11 +176,6 @@ fn lock_git_dependency(lib: &mut Haxelib, long_id: bool) -> Result<LockResult> {
     lib.vcs_ref = Some(commit_sha.clone());
 
     Ok(LockResult::Locked(commit_sha))
-}
-
-fn get_lib_path(lib_name: &str) -> PathBuf {
-    let comma_replace = lib_name.replace(".", ",");
-    Path::new(".haxelib").join(comma_replace)
 }
 
 pub fn check_locked(deps: &Dependancies) -> Result<()> {

@@ -203,7 +203,9 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
         ));
     }
 
-    let output_dir: PathBuf = [".haxelib", haxelib.name.as_str()].iter().collect();
+    let output_dir: PathBuf = [".haxelib", haxelib.name_as_commas().as_str()]
+        .iter()
+        .collect();
 
     if let Err(e) = std::fs::create_dir(&output_dir) {
         if e.kind() != std::io::ErrorKind::AlreadyExists {
@@ -290,7 +292,9 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
 /// - Smart checkout: tries local first, fetches only if commit not found
 /// - Properly handles submodules with --init --recursive
 pub fn install_or_update_git_cli(haxelib: &Haxelib) -> Result<()> {
-    let git_dir_path = PathBuf::from(".haxelib").join(&haxelib.name).join("git");
+    let git_dir_path = PathBuf::from(".haxelib")
+        .join(haxelib.name_as_commas())
+        .join("git");
 
     let parent_dir = git_dir_path.parent().unwrap();
 
@@ -609,7 +613,9 @@ fn rename_origin_remote(repo_path: &Path, new_name: &str) -> Result<()> {
 /// Handle a git conflict by prompting user and executing their choice
 fn handle_git_conflict(haxelib_status: &HaxelibStatus) -> Result<()> {
     let haxelib = haxelib_status.lib;
-    let repo_path = PathBuf::from(".haxelib").join(&haxelib.name).join("git");
+    let repo_path = PathBuf::from(".haxelib")
+        .join(haxelib.name_as_commas())
+        .join("git");
 
     // Prompt user for resolution strategy
     let choice = prompt_conflict_resolution(haxelib, haxelib_status)?;
@@ -806,7 +812,9 @@ fn prompt_conflict_resolution(
     haxelib: &Haxelib,
     status: &HaxelibStatus,
 ) -> Result<ConflictResolution> {
-    let repo_path = PathBuf::from(".haxelib").join(&haxelib.name).join("git");
+    let repo_path = PathBuf::from(".haxelib")
+        .join(haxelib.name_as_commas())
+        .join("git");
 
     // Get diff stat to show what changed
     let diff_stat = get_git_diff_stat(&repo_path)?;

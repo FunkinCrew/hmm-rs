@@ -75,8 +75,7 @@ pub fn compare_haxelib_to_hmm(deps: &Dependancies) -> Result<Vec<HaxelibStatus>>
 
 fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus> {
     // Haxelib folders replace . with , in the folder name
-    let comma_replace = haxelib.name.replace(".", ",");
-    let lib_path = Path::new(".haxelib").join(comma_replace.as_str());
+    let lib_path = Path::new(".haxelib").join(haxelib.name_as_commas());
 
     // assumes an error will occur, and if not, this line will be rewritten at the end of the for loop
     println!(
@@ -183,10 +182,7 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus> {
                         haxelib,
                         InstallType::Conflict,
                         get_wants(haxelib),
-                        Some(format!(
-                            "{} (wrong commit + local changes)",
-                            head_ref.id()
-                        )),
+                        Some(format!("{} (wrong commit + local changes)", head_ref.id())),
                     ));
                 }
                 (true, false) => {

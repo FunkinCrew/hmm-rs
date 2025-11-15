@@ -20,14 +20,19 @@ pub struct Haxelib {
 
 impl Haxelib {
     pub fn version(&self) -> &str {
-        self.version.as_deref().unwrap_or_else(|| panic!("{}: version field is required for Haxelib
+        self.version.as_deref().unwrap_or_else(|| {
+            panic!(
+                "{}: version field is required for Haxelib
   type",
-            self.name))
+                self.name
+            )
+        })
     }
 
     pub fn vcs_ref(&self) -> &str {
-        self.vcs_ref.as_deref().unwrap_or_else(|| panic!("{}: vcs_ref field is required for Git type",
-            self.name))
+        self.vcs_ref
+            .as_deref()
+            .unwrap_or_else(|| panic!("{}: vcs_ref field is required for Git type", self.name))
     }
 
     pub fn url(&self) -> &str {
@@ -95,6 +100,10 @@ impl Haxelib {
 
     pub fn version_as_commas(&self) -> String {
         self.version().replace(".", ",")
+    }
+
+    pub fn name_as_commas(&self) -> String {
+        self.name.replace(".", ",")
     }
 }
 
