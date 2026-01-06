@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Haxelib {
@@ -105,6 +106,26 @@ impl Haxelib {
     pub fn name_as_commas(&self) -> String {
         self.name.replace(".", ",")
     }
+
+    /// Returns the library directory path: .haxelib/{name_with_commas}
+    pub fn lib_dir_path(&self) -> PathBuf {
+        lib_dir_path_for_name(&self.name)
+    }
+
+    /// Returns the git repo path: .haxelib/{name_with_commas}/git
+    pub fn git_repo_path(&self) -> PathBuf {
+        self.lib_dir_path().join("git")
+    }
+}
+
+/// Returns the library directory path given a library name
+pub fn lib_dir_path_for_name(name: &str) -> PathBuf {
+    PathBuf::from(".haxelib").join(name.replace(".", ","))
+}
+
+/// Returns the git repo path given a library name
+pub fn git_repo_path_for_name(name: &str) -> PathBuf {
+    lib_dir_path_for_name(name).join("git")
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]

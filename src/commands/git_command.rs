@@ -7,7 +7,7 @@ use crate::{
     hmm::{
         self,
         dependencies::Dependancies,
-        haxelib::{Haxelib, HaxelibType},
+        haxelib::{git_repo_path_for_name, Haxelib, HaxelibType},
     },
 };
 
@@ -80,11 +80,12 @@ pub fn install_git(
 
 /// Detect the current git ref (branch/tag/commit) after cloning
 fn detect_current_git_ref(name: &str) -> Result<String> {
-    let repo_path = format!(".haxelib/{}/git", name.replace(".", ","));
+    let repo_path = git_repo_path_for_name(name);
+    let repo_path_str = repo_path.to_str().unwrap();
 
     // Try to get the current branch name
     let branch_output = std::process::Command::new("git")
-        .args(["-C", &repo_path, "rev-parse", "--abbrev-ref", "HEAD"])
+        .args(["-C", repo_path_str, "rev-parse", "--abbrev-ref", "HEAD"])
         .output()?;
 
     if branch_output.status.success() {
@@ -95,7 +96,7 @@ fn detect_current_git_ref(name: &str) -> Result<String> {
         // If we're in detached HEAD state, get the commit SHA
         if branch == "HEAD" {
             let commit_output = std::process::Command::new("git")
-                .args(["-C", &repo_path, "rev-parse", "HEAD"])
+                .args(["-C", repo_path_str, "rev-parse", "HEAD"])
                 .output()?;
 
             if commit_output.status.success() {
@@ -111,7 +112,7 @@ fn detect_current_git_ref(name: &str) -> Result<String> {
 
     // Fallback: just get the commit SHA
     let commit_output = std::process::Command::new("git")
-        .args(["-C", &repo_path, "rev-parse", "HEAD"])
+        .args(["-C", repo_path_str, "rev-parse", "HEAD"])
         .output()?;
 
     if commit_output.status.success() {

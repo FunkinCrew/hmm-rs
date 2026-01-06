@@ -12,7 +12,6 @@ use std::env;
 use std::fs::File;
 use std::io::{stdin, stdout, Write};
 use std::path::Path;
-use std::path::PathBuf;
 use yansi::Paint;
 use zip::ZipArchive;
 
@@ -203,9 +202,7 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
         ));
     }
 
-    let output_dir: PathBuf = [".haxelib", haxelib.name_as_commas().as_str()]
-        .iter()
-        .collect();
+    let output_dir = haxelib.lib_dir_path();
 
     if let Err(e) = std::fs::create_dir(&output_dir) {
         if e.kind() != std::io::ErrorKind::AlreadyExists {
@@ -292,11 +289,8 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
 /// - Smart checkout: tries local first, fetches only if commit not found
 /// - Properly handles submodules with --init --recursive
 pub fn install_or_update_git_cli(haxelib: &Haxelib) -> Result<()> {
-    let git_dir_path = PathBuf::from(".haxelib")
-        .join(haxelib.name_as_commas())
-        .join("git");
-
-    let parent_dir = git_dir_path.parent().unwrap();
+    let git_dir_path = haxelib.git_repo_path();
+    let parent_dir = haxelib.lib_dir_path();
 
     // Ensure repository exists (clone if needed)
     if !git_dir_path.exists() {
@@ -307,7 +301,7 @@ pub fn install_or_update_git_cli(haxelib: &Haxelib) -> Result<()> {
         clone_blobless_git_repo(haxelib, &git_dir_path)?;
 
         // Create .current file indicating this is a git install
-        create_current_file(parent_dir, &String::from("git"))?;
+        create_current_file(&parent_dir, &String::from("git"))?;
     } else {
         println!("Repository exists, checking out {}...", haxelib.name);
     }
@@ -613,9 +607,7 @@ fn rename_origin_remote(repo_path: &Path, new_name: &str) -> Result<()> {
 /// Handle a git conflict by prompting user and executing their choice
 fn handle_git_conflict(haxelib_status: &HaxelibStatus) -> Result<()> {
     let haxelib = haxelib_status.lib;
-    let repo_path = PathBuf::from(".haxelib")
-        .join(haxelib.name_as_commas())
-        .join("git");
+    let repo_path = haxelib.git_repo_path();
 
     // Prompt user for resolution strategy
     let choice = prompt_conflict_resolution(haxelib, haxelib_status)?;
@@ -812,9 +804,7 @@ fn prompt_conflict_resolution(
     haxelib: &Haxelib,
     status: &HaxelibStatus,
 ) -> Result<ConflictResolution> {
-    let repo_path = PathBuf::from(".haxelib")
-        .join(haxelib.name_as_commas())
-        .join("git");
+    let repo_path = haxelib.git_repo_path();
 
     // Get diff stat to show what changed
     let diff_stat = get_git_diff_stat(&repo_path)?;

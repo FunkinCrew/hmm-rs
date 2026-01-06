@@ -7,7 +7,7 @@ use anyhow::Result;
 use crate::hmm::{
     self,
     dependencies::Dependancies,
-    haxelib::{Haxelib, HaxelibType},
+    haxelib::{lib_dir_path_for_name, Haxelib, HaxelibType},
 };
 
 pub fn add_dev_dependency(
@@ -29,14 +29,8 @@ pub fn add_dev_dependency(
         version: None,
     };
 
-    // Create .haxelib directory if it doesn't exist
-    let haxelib_dir = Path::new(".haxelib");
-    if !haxelib_dir.exists() {
-        fs::create_dir_all(haxelib_dir)?;
-    }
-
-    // Create the library directory inside .haxelib
-    let lib_dir = haxelib_dir.join(name.replace(".", ","));
+    // Create the library directory inside .haxelib (create_dir_all handles parent creation)
+    let lib_dir = lib_dir_path_for_name(name);
     if !lib_dir.exists() {
         fs::create_dir_all(&lib_dir)?;
     }

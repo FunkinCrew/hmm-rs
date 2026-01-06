@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 use yansi::Paint;
@@ -127,7 +127,7 @@ fn lock_haxelib_dependency(lib: &mut Haxelib) -> Result<LockResult> {
     }
 
     // Read the .current file to get installed version
-    let lib_path = Path::new(".haxelib").join(lib.name_as_commas());
+    let lib_path = lib.lib_dir_path();
     let current_file = lib_path.join(".current");
 
     if !current_file.exists() {
@@ -146,8 +146,7 @@ fn lock_haxelib_dependency(lib: &mut Haxelib) -> Result<LockResult> {
 }
 
 fn lock_git_dependency(lib: &mut Haxelib, long_id: bool) -> Result<LockResult> {
-    let lib_path = Path::new(".haxelib").join(lib.name_as_commas());
-    let git_path = lib_path.join("git");
+    let git_path = lib.git_repo_path();
 
     if !git_path.exists() {
         return Err(anyhow!(

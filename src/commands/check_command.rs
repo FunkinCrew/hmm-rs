@@ -1,4 +1,4 @@
-use std::{fs::File, path::Path};
+use std::fs::File;
 
 use crate::hmm::dependencies::Dependancies;
 use crate::hmm::haxelib::{Haxelib, HaxelibType};
@@ -74,8 +74,7 @@ pub fn compare_haxelib_to_hmm(deps: &Dependancies) -> Result<Vec<HaxelibStatus>>
 }
 
 fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus> {
-    // Haxelib folders replace . with , in the folder name
-    let lib_path = Path::new(".haxelib").join(haxelib.name_as_commas());
+    let lib_path = haxelib.lib_dir_path();
 
     // assumes an error will occur, and if not, this line will be rewritten at the end of the for loop
     println!(

@@ -3,8 +3,8 @@
     {
       "name": "flixel",
       "type": "git",
-      "ref": "master",
       "dir": null,
+      "ref": "master",
       "url": "https://github.com/haxeflixel/flixel"
     },
     {
@@ -14,10 +14,17 @@
       "version": "3.3.0"
     },
     {
+      "name": "funkin.vis",
+      "type": "git",
+      "dir": null,
+      "ref": "main",
+      "url": "https://github.com/FunkinCrew/funkVis"
+    },
+    {
       "name": "hxcpp",
       "type": "git",
-      "ref": "v4.3.68",
       "dir": null,
+      "ref": "v4.3.68",
       "url": "https://github.com/HaxeFoundation/hxcpp"
     }
   ]
