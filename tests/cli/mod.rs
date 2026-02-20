@@ -7,3 +7,4 @@ mod list;
 mod lock;
 mod remove;
 mod to_hxml;
+mod upgrade;

@@ -9,3 +9,4 @@ pub mod install_command;
 pub mod lock_command;
 pub mod remove_command;
 pub mod tohxml_command;
+pub mod upgrade_command;

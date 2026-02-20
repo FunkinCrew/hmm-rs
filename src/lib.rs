@@ -83,6 +83,13 @@ enum Commands {
         /// The file system path (absolute or relative)
         path: String,
     },
+    /// Check for and install updates to hmm-rs itself
+    #[command(visible_alias = "self-update")]
+    Upgrade {
+        /// Only check for updates without installing
+        #[arg(long)]
+        check: bool,
+    },
     /// Locks dependencies to their currently installed versions
     Lock {
         #[command(subcommand)]
@@ -157,6 +164,7 @@ pub fn run() -> Result<()> {
             commands::git_command::install_git(&name, &url, &git_ref, load_deps()?, path)?
         }
         Commands::Remove { lib: _ } => commands::remove_command::remove_haxelibs()?,
+        Commands::Upgrade { check } => commands::upgrade_command::upgrade(check)?,
         Commands::Dev { name, path } => commands::dev_command::add_dev_dependency(
             &name,
             &path,
