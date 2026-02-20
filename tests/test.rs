@@ -1,20 +1,22 @@
 use std::path::PathBuf;
 
+use assert_fs::prelude::*;
 use hmm_rs::commands::*;
 use hmm_rs::hmm;
 use hmm_rs::hmm::haxelib::HaxelibType;
+use predicates::prelude::*;
 
 mod common;
 
 #[test]
 fn test_clean_haxelib_folder() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = assert_fs::TempDir::new().unwrap();
     let haxelib_dir = tmp.path().join(".haxelib");
     std::fs::create_dir(&haxelib_dir).unwrap();
 
     // Should succeed when .haxelib exists
     assert!(clean_command::remove_haxelib_folder_at(tmp.path()).is_ok());
-    assert!(!haxelib_dir.exists());
+    tmp.child(".haxelib").assert(predicate::path::missing());
 
     // Should fail when .haxelib is already gone
     assert!(clean_command::remove_haxelib_folder_at(tmp.path()).is_err());
@@ -22,12 +24,11 @@ fn test_clean_haxelib_folder() {
 
 #[test]
 fn test_create_haxelib_folder() {
-    let tmp = tempfile::tempdir().unwrap();
-    let haxelib_dir = tmp.path().join(".haxelib");
+    let tmp = assert_fs::TempDir::new().unwrap();
 
     // Should succeed when .haxelib doesn't exist
     assert!(init_command::create_haxelib_folder_at(tmp.path()).is_ok());
-    assert!(haxelib_dir.exists());
+    tmp.child(".haxelib").assert(predicate::path::is_dir());
 
     // Should fail when .haxelib already exists
     assert!(init_command::create_haxelib_folder_at(tmp.path()).is_err());
