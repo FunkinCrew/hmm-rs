@@ -24,3 +24,18 @@ pub fn create_haxelib_folder_at(base: &Path) -> Result<()> {
     println!("Creating .haxelib/ folder");
     std::fs::create_dir(&haxelib_path).context("Failed to create .haxelib folder")
 }
+
+/// Ensures .haxelib/ exists, creating it if missing. Unlike create_haxelib_folder(),
+/// this does NOT error if the folder already exists.
+pub fn ensure_haxelib_folder() -> Result<()> {
+    ensure_haxelib_folder_at(Path::new("."))
+}
+
+pub fn ensure_haxelib_folder_at(base: &Path) -> Result<()> {
+    let haxelib_path = base.join(".haxelib");
+    if !haxelib_path.exists() {
+        println!("Creating .haxelib/ folder");
+        std::fs::create_dir(&haxelib_path).context("Failed to create .haxelib folder")?;
+    }
+    Ok(())
+}

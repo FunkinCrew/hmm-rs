@@ -32,6 +32,7 @@ enum ConflictResolution {
 }
 
 pub fn install_from_hmm(deps: &Dependancies) -> Result<()> {
+    super::init_command::ensure_haxelib_folder()?;
     let installs_needed = compare_haxelib_to_hmm(deps)?;
     println!(
         "{} dependencies need to be installed",
