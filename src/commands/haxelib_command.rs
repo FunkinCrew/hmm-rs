@@ -41,10 +41,13 @@ pub fn install_haxelib(
             let serialized = format!("ay3:apiy16:getLatestVersionhay{}:{}h", name.len(), name);
             let client = Client::new();
 
+            let url = format!(
+                "https://lib.haxe.org/api/3.0/index.n/?__x={}",
+                urlencoding::encode(&serialized)
+            );
             let resp = client
-                .get("https://lib.haxe.org/api/3.0/index.n/")
+                .get(&url)
                 .header("X-Haxe-Remoting", "1")
-                .query(&[("__x", serialized)])
                 .send()?;
 
             let resp = resp.text()?;
