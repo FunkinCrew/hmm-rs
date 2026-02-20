@@ -20,26 +20,25 @@ pub struct Haxelib {
 }
 
 impl Haxelib {
-    pub fn version(&self) -> &str {
-        self.version.as_deref().unwrap_or_else(|| {
-            panic!(
-                "{}: version field is required for Haxelib
-  type",
+    pub fn version(&self) -> Result<&str> {
+        self.version.as_deref().ok_or_else(|| {
+            anyhow!(
+                "{}: 'version' field is required for haxelib type",
                 self.name
             )
         })
     }
 
-    pub fn vcs_ref(&self) -> &str {
+    pub fn vcs_ref(&self) -> Result<&str> {
         self.vcs_ref
             .as_deref()
-            .unwrap_or_else(|| panic!("{}: vcs_ref field is required for Git type", self.name))
+            .ok_or_else(|| anyhow!("{}: 'ref' field is required for git type", self.name))
     }
 
-    pub fn url(&self) -> &str {
+    pub fn url(&self) -> Result<&str> {
         self.url
             .as_deref()
-            .unwrap_or_else(|| panic!("{}: url field is required", self.name))
+            .ok_or_else(|| anyhow!("{}: 'url' field is required", self.name))
     }
 
     pub fn try_version(&self) -> Option<&str> {
@@ -99,8 +98,8 @@ impl Haxelib {
         }
     }
 
-    pub fn version_as_commas(&self) -> String {
-        self.version().replace(".", ",")
+    pub fn version_as_commas(&self) -> Result<String> {
+        Ok(self.version()?.replace(".", ","))
     }
 
     pub fn name_as_commas(&self) -> String {
@@ -187,7 +186,7 @@ mod tests {
     #[test]
     fn test_version_as_commas() {
         let h = make_haxelib("flixel", HaxelibType::Haxelib, Some("3.3.0"), None, None);
-        assert_eq!(h.version_as_commas(), "3,3,0");
+        assert_eq!(h.version_as_commas().unwrap(), "3,3,0");
     }
 
     // --- path construction ---
@@ -304,26 +303,23 @@ mod tests {
         assert_eq!(h.try_url(), None);
     }
 
-    // --- panicking accessors ---
+    // --- error-returning accessors ---
 
     #[test]
-    #[should_panic(expected = "version field is required")]
-    fn test_version_panics_when_none() {
+    fn test_version_errors_when_none() {
         let h = make_haxelib("x", HaxelibType::Haxelib, None, None, None);
-        h.version();
+        assert!(h.version().is_err());
     }
 
     #[test]
-    #[should_panic(expected = "vcs_ref field is required")]
-    fn test_vcs_ref_panics_when_none() {
+    fn test_vcs_ref_errors_when_none() {
         let h = make_haxelib("x", HaxelibType::Git, None, None, None);
-        h.vcs_ref();
+        assert!(h.vcs_ref().is_err());
     }
 
     #[test]
-    #[should_panic(expected = "url field is required")]
-    fn test_url_panics_when_none() {
+    fn test_url_errors_when_none() {
         let h = make_haxelib("x", HaxelibType::Git, None, None, None);
-        h.url();
+        assert!(h.url().is_err());
     }
 }

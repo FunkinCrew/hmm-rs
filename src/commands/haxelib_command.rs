@@ -49,7 +49,14 @@ pub fn install_haxelib(
 
             let resp = resp.text()?;
             let resp_splits = resp.split(":").collect::<Vec<&str>>();
-            let decoded_resp = urlencoding::decode(resp_splits[1])?;
+            let encoded = resp_splits.get(1).ok_or_else(|| {
+                anyhow!(
+                    "Unexpected response from lib.haxe.org for '{}': {}",
+                    name,
+                    &resp[..resp.len().min(200)]
+                )
+            })?;
+            let decoded_resp = urlencoding::decode(encoded)?;
 
             println!("Latest version of {} is {}", name, decoded_resp);
 

@@ -123,7 +123,7 @@ fn lock_dependency(lib: &mut Haxelib, long_id: bool) -> Result<LockResult> {
 fn lock_haxelib_dependency(lib: &mut Haxelib) -> Result<LockResult> {
     // Check if already locked
     if lib.version.is_some() {
-        return Ok(LockResult::AlreadyLocked(String::from(lib.version())));
+        return Ok(LockResult::AlreadyLocked(String::from(lib.version()?)));
     }
 
     // Read the .current file to get installed version

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::{Ok, Result};
+use anyhow::{anyhow, Ok, Result};
 
 use crate::{
     commands,
@@ -78,10 +78,15 @@ pub fn install_git(
     Ok(())
 }
 
+fn path_to_str(path: &std::path::Path) -> Result<&str> {
+    path.to_str()
+        .ok_or_else(|| anyhow!("Path contains invalid UTF-8: {}", path.display()))
+}
+
 /// Detect the current git ref (branch/tag/commit) after cloning
 fn detect_current_git_ref(name: &str) -> Result<String> {
     let repo_path = git_repo_path_for_name(name);
-    let repo_path_str = repo_path.to_str().unwrap();
+    let repo_path_str = path_to_str(&repo_path)?;
 
     // Try to get the current branch name
     let branch_output = std::process::Command::new("git")

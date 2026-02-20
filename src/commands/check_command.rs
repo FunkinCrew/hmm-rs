@@ -2,7 +2,7 @@ use std::fs::File;
 
 use crate::hmm::dependencies::Dependancies;
 use crate::hmm::haxelib::{Haxelib, HaxelibType};
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use console::Emoji;
 use gix::hash::Prefix;
 use std::io::Read;
@@ -157,14 +157,19 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
                 }
             };
 
-            // TODO: Need to make sure this unwraps for detatched head!
-            let head_ref = repo.head_commit().unwrap();
+            let head_ref = repo
+                .head_commit()
+                .context("could not read HEAD — repo may be empty or corrupt")?;
 
             // If our head ref is a tag or branch, we check if we already have it in our history
             // If it's not a tag, we check via commit id
-            let intended_commit = match repo.find_reference(haxelib.vcs_ref.as_ref().unwrap()) {
+            let vcs_ref = haxelib
+                .vcs_ref
+                .as_ref()
+                .ok_or_else(|| anyhow!("{}: 'ref' field is required for git type", haxelib.name))?;
+            let intended_commit = match repo.find_reference(vcs_ref) {
                 Ok(r) => r.id().shorten_or_id(),
-                Err(_) => Prefix::from_hex(haxelib.vcs_ref.as_ref().unwrap())?,
+                Err(_) => Prefix::from_hex(vcs_ref)?,
             };
 
             let is_wrong_commit = head_ref
@@ -205,8 +210,8 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
                 }
             }
 
-            // we have a correct version, so we're going to update the current_version to to the vcs_ref
-            current_version = haxelib.vcs_ref.as_ref().unwrap().to_string();
+            // we have a correct version, so we're going to update the current_version to the vcs_ref
+            current_version = vcs_ref.to_string();
         }
         _ => {}
     }
@@ -231,7 +236,7 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             );
             println!(
                 "Expected: {} | Installed: {}",
-                haxelib_status.wants.as_ref().unwrap().red(),
+                haxelib_status.wants.as_deref().unwrap_or("unknown").red(),
                 "None".red()
             );
         }
@@ -243,7 +248,7 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             );
             println!(
                 "Expected: {} | Installed: {}",
-                haxelib_status.wants.as_ref().unwrap().red(),
+                haxelib_status.wants.as_deref().unwrap_or("unknown").red(),
                 "None".red()
             );
         }
@@ -255,8 +260,8 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             );
             println!(
                 "Expected: {} | Installed: {}",
-                haxelib_status.wants.as_ref().unwrap().red(),
-                haxelib_status.installed.as_ref().unwrap().red()
+                haxelib_status.wants.as_deref().unwrap_or("unknown").red(),
+                haxelib_status.installed.as_deref().unwrap_or("unknown").red()
             );
         }
         InstallType::AlreadyInstalled => {
@@ -264,7 +269,7 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
                 "{} [{:?}]: {} {}",
                 haxelib_status.lib.name.green().bold(),
                 haxelib_status.lib.haxelib_type.green().dim(),
-                haxelib_status.wants.as_ref().unwrap().green().dim(),
+                haxelib_status.wants.as_deref().unwrap_or("unknown").green().dim(),
                 Emoji("✅", "[✔️]")
             );
             println!("{}", inner.bright_green().wrap());
@@ -291,7 +296,7 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             println!(
                 "{} {}",
                 "`hmm lock` to version:".yellow().bright(),
-                haxelib_status.installed.as_ref().unwrap().yellow()
+                haxelib_status.installed.as_deref().unwrap_or("unknown").yellow()
             )
         }
     }
