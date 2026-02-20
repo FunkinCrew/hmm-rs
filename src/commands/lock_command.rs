@@ -3,7 +3,7 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
-use yansi::Paint;
+use owo_colors::OwoColorize;
 
 use crate::hmm::dependencies::Dependancies;
 use crate::hmm::haxelib::{Haxelib, HaxelibType};
@@ -49,7 +49,7 @@ pub fn lock_dependencies(
                 println!(
                     "{} {} locked to {}",
                     lib.name.green().bold(),
-                    format!("[{:?}]", lib.haxelib_type).green().dim(),
+                    format!("[{:?}]", lib.haxelib_type).green().dimmed(),
                     version.green()
                 );
                 locked_count += 1;
@@ -58,7 +58,7 @@ pub fn lock_dependencies(
                 println!(
                     "{} {} skipped: {}",
                     lib.name.yellow().bold(),
-                    format!("[{:?}]", lib.haxelib_type).yellow().dim(),
+                    format!("[{:?}]", lib.haxelib_type).yellow().dimmed(),
                     reason.yellow()
                 );
                 skipped_count += 1;
@@ -71,7 +71,7 @@ pub fn lock_dependencies(
                 println!(
                     "{} {} error: {}",
                     lib.name.red().bold(),
-                    format!("[{:?}]", lib.haxelib_type).red().dim(),
+                    format!("[{:?}]", lib.haxelib_type).red().dimmed(),
                     e.to_string().red()
                 );
                 error_count += 1;
@@ -191,7 +191,7 @@ pub fn check_locked(deps: &Dependancies) -> Result<()> {
                 println!(
                     "{} {} is not locked: {}",
                     lib.name.red().bold(),
-                    format!("[{:?}]", lib.haxelib_type).red().dim(),
+                    format!("[{:?}]", lib.haxelib_type).red().dimmed(),
                     reason.red()
                 );
                 unlocked_libs.push(&lib.name);

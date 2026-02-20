@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use console::Emoji;
 use gix::hash::Prefix;
 use std::io::Read;
-use yansi::Paint;
+use owo_colors::OwoColorize;
 
 pub struct HaxelibStatus<'a> {
     pub lib: &'a Haxelib,
@@ -268,11 +268,11 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             let inner = format!(
                 "{} [{:?}]: {} {}",
                 haxelib_status.lib.name.green().bold(),
-                haxelib_status.lib.haxelib_type.green().dim(),
-                haxelib_status.wants.as_deref().unwrap_or("unknown").green().dim(),
+                haxelib_status.lib.haxelib_type.green().dimmed(),
+                haxelib_status.wants.as_deref().unwrap_or("unknown").green().dimmed(),
                 Emoji("✅", "[✔️]")
             );
-            println!("{}", inner.bright_green().wrap());
+            println!("{}", inner.bright_green());
         }
         InstallType::Conflict => {
             println!(
@@ -295,7 +295,7 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             );
             println!(
                 "{} {}",
-                "`hmm lock` to version:".yellow().bright(),
+                "`hmm lock` to version:".bright_yellow(),
                 haxelib_status.installed.as_deref().unwrap_or("unknown").yellow()
             )
         }

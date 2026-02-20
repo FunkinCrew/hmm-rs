@@ -12,7 +12,7 @@ use std::env;
 use std::fs::File;
 use std::io::{stdin, stdout, Write};
 use std::path::Path;
-use yansi::Paint;
+use owo_colors::OwoColorize;
 use zip::ZipArchive;
 
 use super::check_command::compare_haxelib_to_hmm;
