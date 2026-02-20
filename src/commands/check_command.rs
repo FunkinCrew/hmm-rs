@@ -59,7 +59,7 @@ pub fn check(deps: &Dependancies) -> Result<()> {
     Ok(())
 }
 
-pub fn compare_haxelib_to_hmm(deps: &Dependancies) -> Result<Vec<HaxelibStatus>> {
+pub fn compare_haxelib_to_hmm(deps: &Dependancies) -> Result<Vec<HaxelibStatus<'_>>> {
     let mut install_status = Vec::new();
 
     for haxelib in deps.dependencies.iter() {
@@ -73,7 +73,7 @@ pub fn compare_haxelib_to_hmm(deps: &Dependancies) -> Result<Vec<HaxelibStatus>>
     Ok(install_status)
 }
 
-fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus> {
+fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
     let lib_path = haxelib.lib_dir_path();
 
     // assumes an error will occur, and if not, this line will be rewritten at the end of the for loop
