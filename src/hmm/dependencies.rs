@@ -72,3 +72,50 @@ impl Dependancies {
         println!("{}", haxelib_output);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_deps(names: &[&str]) -> Dependancies {
+        Dependancies {
+            dependencies: names
+                .iter()
+                .map(|name| Haxelib {
+                    name: name.to_string(),
+                    haxelib_type: HaxelibType::Haxelib,
+                    dir: None,
+                    vcs_ref: None,
+                    path: None,
+                    url: None,
+                    version: Some("1.0.0".to_string()),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn test_get_haxelib_found() {
+        let deps = make_deps(&["flixel", "lime"]);
+        let result = deps.get_haxelib("lime");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().name, "lime");
+    }
+
+    #[test]
+    fn test_get_haxelib_not_found() {
+        let deps = make_deps(&["flixel", "lime"]);
+        let result = deps.get_haxelib("nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_haxelib_returns_first_match() {
+        // If duplicates exist, get_haxelib returns the first one (linear search)
+        let mut deps = make_deps(&["flixel", "flixel"]);
+        deps.dependencies[0].version = Some("1.0.0".to_string());
+        deps.dependencies[1].version = Some("2.0.0".to_string());
+        let result = deps.get_haxelib("flixel").unwrap();
+        assert_eq!(result.try_version(), Some("1.0.0"));
+    }
+}

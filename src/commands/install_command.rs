@@ -907,3 +907,44 @@ pub fn create_current_file(path: &Path, content: &String) -> Result<()> {
     write!(current_version_file, "{}", content)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_remote_https_with_git_suffix() {
+        let result = parse_remote_name_from_url("https://github.com/haxeflixel/flixel.git");
+        assert_eq!(result.unwrap(), "haxeflixel/flixel");
+    }
+
+    #[test]
+    fn test_parse_remote_https_without_git_suffix() {
+        let result = parse_remote_name_from_url("https://github.com/haxeflixel/flixel");
+        assert_eq!(result.unwrap(), "haxeflixel/flixel");
+    }
+
+    #[test]
+    fn test_parse_remote_ssh_colon_format() {
+        let result = parse_remote_name_from_url("git@github.com:user/repo.git");
+        assert_eq!(result.unwrap(), "user/repo");
+    }
+
+    #[test]
+    fn test_parse_remote_ssh_protocol() {
+        let result = parse_remote_name_from_url("ssh://git@github.com/user/repo.git");
+        assert_eq!(result.unwrap(), "user/repo");
+    }
+
+    #[test]
+    fn test_parse_remote_http() {
+        let result = parse_remote_name_from_url("http://github.com/FunkinCrew/funkVis");
+        assert_eq!(result.unwrap(), "FunkinCrew/funkVis");
+    }
+
+    #[test]
+    fn test_parse_remote_invalid_url() {
+        let result = parse_remote_name_from_url("not-a-url");
+        assert!(result.is_err());
+    }
+}

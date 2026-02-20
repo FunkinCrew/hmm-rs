@@ -335,4 +335,32 @@ mod tests {
         };
         assert_eq!(get_wants(&haxelib), Some("master".to_string()));
     }
+
+    #[test]
+    fn test_get_wants_dev() {
+        let haxelib = Haxelib {
+            name: "local-lib".to_string(),
+            haxelib_type: HaxelibType::Dev,
+            vcs_ref: None,
+            dir: None,
+            url: None,
+            version: None,
+            path: Some("/some/path".to_string()),
+        };
+        assert_eq!(get_wants(&haxelib), None);
+    }
+
+    #[test]
+    fn test_get_wants_mercurial() {
+        let haxelib = Haxelib {
+            name: "hg-lib".to_string(),
+            haxelib_type: HaxelibType::Mecurial,
+            vcs_ref: None,
+            dir: None,
+            url: None,
+            version: None,
+            path: None,
+        };
+        assert_eq!(get_wants(&haxelib), None);
+    }
 }

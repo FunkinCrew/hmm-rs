@@ -8,7 +8,11 @@ pub fn init_hmm() -> Result<()> {
 }
 
 pub fn create_haxelib_folder() -> Result<()> {
-    let haxelib_path = Path::new(".haxelib");
+    create_haxelib_folder_at(Path::new("."))
+}
+
+pub fn create_haxelib_folder_at(base: &Path) -> Result<()> {
+    let haxelib_path = base.join(".haxelib");
     if haxelib_path.exists() {
         let err_message = format!(
             "{} \n{}",
@@ -18,5 +22,5 @@ pub fn create_haxelib_folder() -> Result<()> {
         Err(anyhow!(err_message))?
     }
     println!("Creating .haxelib/ folder");
-    std::fs::create_dir(haxelib_path).context("Failed to create .haxelib folder")
+    std::fs::create_dir(&haxelib_path).context("Failed to create .haxelib folder")
 }

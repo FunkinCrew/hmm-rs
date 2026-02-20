@@ -139,3 +139,191 @@ pub enum HaxelibType {
     #[serde(rename = "hg")]
     Mecurial,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_haxelib(
+        name: &str,
+        haxelib_type: HaxelibType,
+        version: Option<&str>,
+        vcs_ref: Option<&str>,
+        url: Option<&str>,
+    ) -> Haxelib {
+        Haxelib {
+            name: name.to_string(),
+            haxelib_type,
+            dir: None,
+            vcs_ref: vcs_ref.map(|s| s.to_string()),
+            path: None,
+            url: url.map(|s| s.to_string()),
+            version: version.map(|s| s.to_string()),
+        }
+    }
+
+    // --- name_as_commas ---
+
+    #[test]
+    fn test_name_as_commas_with_dots() {
+        let h = make_haxelib("funkin.vis", HaxelibType::Git, None, None, None);
+        assert_eq!(h.name_as_commas(), "funkin,vis");
+    }
+
+    #[test]
+    fn test_name_as_commas_without_dots() {
+        let h = make_haxelib("flixel", HaxelibType::Git, None, None, None);
+        assert_eq!(h.name_as_commas(), "flixel");
+    }
+
+    #[test]
+    fn test_name_as_commas_multiple_dots() {
+        let h = make_haxelib("a.b.c", HaxelibType::Git, None, None, None);
+        assert_eq!(h.name_as_commas(), "a,b,c");
+    }
+
+    // --- version_as_commas ---
+
+    #[test]
+    fn test_version_as_commas() {
+        let h = make_haxelib("flixel", HaxelibType::Haxelib, Some("3.3.0"), None, None);
+        assert_eq!(h.version_as_commas(), "3,3,0");
+    }
+
+    // --- path construction ---
+
+    #[test]
+    fn test_lib_dir_path() {
+        let h = make_haxelib("funkin.vis", HaxelibType::Git, None, None, None);
+        assert_eq!(h.lib_dir_path(), PathBuf::from(".haxelib/funkin,vis"));
+    }
+
+    #[test]
+    fn test_git_repo_path() {
+        let h = make_haxelib("flixel", HaxelibType::Git, None, None, None);
+        assert_eq!(h.git_repo_path(), PathBuf::from(".haxelib/flixel/git"));
+    }
+
+    #[test]
+    fn test_lib_dir_path_for_name() {
+        assert_eq!(
+            lib_dir_path_for_name("funkin.vis"),
+            PathBuf::from(".haxelib/funkin,vis")
+        );
+    }
+
+    #[test]
+    fn test_git_repo_path_for_name() {
+        assert_eq!(
+            git_repo_path_for_name("flixel"),
+            PathBuf::from(".haxelib/flixel/git")
+        );
+    }
+
+    // --- download_url ---
+
+    #[test]
+    fn test_download_url_haxelib() {
+        let h = make_haxelib("flixel-addons", HaxelibType::Haxelib, Some("3.3.0"), None, None);
+        assert_eq!(
+            h.download_url().unwrap(),
+            "https://lib.haxe.org/p/flixel-addons/3.3.0/download"
+        );
+    }
+
+    #[test]
+    fn test_download_url_git() {
+        let h = make_haxelib(
+            "flixel",
+            HaxelibType::Git,
+            None,
+            Some("master"),
+            Some("https://github.com/haxeflixel/flixel"),
+        );
+        assert_eq!(
+            h.download_url().unwrap(),
+            "https://github.com/haxeflixel/flixel"
+        );
+    }
+
+    #[test]
+    fn test_download_url_dev_fails() {
+        let h = make_haxelib("local-lib", HaxelibType::Dev, None, None, None);
+        assert!(h.download_url().is_err());
+    }
+
+    // --- version_or_ref ---
+
+    #[test]
+    fn test_version_or_ref_haxelib() {
+        let h = make_haxelib("flixel-addons", HaxelibType::Haxelib, Some("3.3.0"), None, None);
+        assert_eq!(h.version_or_ref().unwrap(), "3.3.0");
+    }
+
+    #[test]
+    fn test_version_or_ref_git() {
+        let h = make_haxelib("flixel", HaxelibType::Git, None, Some("master"), None);
+        assert_eq!(h.version_or_ref().unwrap(), "master");
+    }
+
+    // --- safe accessors (try_*) ---
+
+    #[test]
+    fn test_try_version_some() {
+        let h = make_haxelib("x", HaxelibType::Haxelib, Some("1.0.0"), None, None);
+        assert_eq!(h.try_version(), Some("1.0.0"));
+    }
+
+    #[test]
+    fn test_try_version_none() {
+        let h = make_haxelib("x", HaxelibType::Git, None, None, None);
+        assert_eq!(h.try_version(), None);
+    }
+
+    #[test]
+    fn test_try_vcs_ref_some() {
+        let h = make_haxelib("x", HaxelibType::Git, None, Some("main"), None);
+        assert_eq!(h.try_vcs_ref(), Some("main"));
+    }
+
+    #[test]
+    fn test_try_vcs_ref_none() {
+        let h = make_haxelib("x", HaxelibType::Haxelib, Some("1.0"), None, None);
+        assert_eq!(h.try_vcs_ref(), None);
+    }
+
+    #[test]
+    fn test_try_url_some() {
+        let h = make_haxelib("x", HaxelibType::Git, None, None, Some("https://example.com"));
+        assert_eq!(h.try_url(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn test_try_url_none() {
+        let h = make_haxelib("x", HaxelibType::Haxelib, Some("1.0"), None, None);
+        assert_eq!(h.try_url(), None);
+    }
+
+    // --- panicking accessors ---
+
+    #[test]
+    #[should_panic(expected = "version field is required")]
+    fn test_version_panics_when_none() {
+        let h = make_haxelib("x", HaxelibType::Haxelib, None, None, None);
+        h.version();
+    }
+
+    #[test]
+    #[should_panic(expected = "vcs_ref field is required")]
+    fn test_vcs_ref_panics_when_none() {
+        let h = make_haxelib("x", HaxelibType::Git, None, None, None);
+        h.vcs_ref();
+    }
+
+    #[test]
+    #[should_panic(expected = "url field is required")]
+    fn test_url_panics_when_none() {
+        let h = make_haxelib("x", HaxelibType::Git, None, None, None);
+        h.url();
+    }
+}
