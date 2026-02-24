@@ -72,3 +72,104 @@ fn install_multiple_deps_does_not_panic_without_haxelib_dir() {
         .code(predicate::ne(101))
         .stdout(predicate::str::contains("Creating .haxelib/ folder"));
 }
+
+#[test]
+fn install_selective_single_lib() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "flixel", "type": "haxelib", "version": "5.0.0"},
+            {"name": "lime", "type": "haxelib", "version": "8.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["install", "flixel"])
+        .assert()
+        .code(predicate::ne(101))
+        .stdout(predicate::str::contains("flixel"))
+        .stdout(predicate::str::contains("Checking lime").not());
+}
+
+#[test]
+fn install_selective_multiple_libs() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "flixel", "type": "haxelib", "version": "5.0.0"},
+            {"name": "lime", "type": "haxelib", "version": "8.0.0"},
+            {"name": "openfl", "type": "haxelib", "version": "9.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["install", "flixel", "lime"])
+        .assert()
+        .code(predicate::ne(101))
+        .stdout(predicate::str::contains("flixel"))
+        .stdout(predicate::str::contains("lime"))
+        .stdout(predicate::str::contains("Checking openfl").not());
+}
+
+#[test]
+fn install_unknown_lib_warns() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "flixel", "type": "haxelib", "version": "5.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["install", "nonexistent"])
+        .assert()
+        .code(predicate::ne(101))
+        .stdout(predicate::str::contains("not found in hmm.json"));
+}
+
+#[test]
+fn install_mixed_known_and_unknown_libs() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "flixel", "type": "haxelib", "version": "5.0.0"},
+            {"name": "lime", "type": "haxelib", "version": "8.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["install", "flixel", "bogus"])
+        .assert()
+        .code(predicate::ne(101))
+        .stdout(predicate::str::contains("not found in hmm.json"))
+        .stdout(predicate::str::contains("flixel"))
+        .stdout(predicate::str::contains("Checking lime").not());
+}
+
+#[test]
+fn install_selective_already_installed() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "flixel", "type": "haxelib", "version": "5.0.0"},
+            {"name": "lime", "type": "haxelib", "version": "8.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("flixel", "5.0.0")]);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["install", "flixel"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("flixel"))
+        .stdout(predicate::str::contains("Checking lime").not());
+}

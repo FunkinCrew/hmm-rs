@@ -49,8 +49,14 @@ enum Commands {
     #[command(visible_alias = "ch")]
     Check,
     /// Installs the dependencies from hmm.json, if they aren't already installed.
+    /// Optionally specify library names to install only those.
     #[command(visible_alias = "i")]
-    Install,
+    Install {
+        /// Specific libraries to install. If omitted, installs all dependencies.
+        /// `hmm-rs install flixel lime` will only install flixel and lime
+        #[arg(value_name = "LIBS")]
+        lib: Option<Vec<String>>,
+    },
     Add(AddArgs),
     /// Installs a haxelib from lib.haxe.org
     Haxelib {
@@ -156,7 +162,9 @@ pub fn run() -> Result<()> {
         Commands::Clean => commands::clean_command::remove_haxelib_folder()?,
         Commands::ToHxml { hxml } => commands::tohxml_command::dump_to_hxml(&load_deps()?, hxml)?,
         Commands::Check => commands::check_command::check(&load_deps()?)?,
-        Commands::Install => commands::install_command::install_from_hmm(&load_deps()?)?,
+        Commands::Install { lib } => {
+            commands::install_command::install_from_hmm(&load_deps()?, &lib)?
+        }
         Commands::Haxelib { name, version } => {
             commands::haxelib_command::install_haxelib(&name, &version, load_deps()?, path)?
         }
