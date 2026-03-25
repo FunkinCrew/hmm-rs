@@ -10,7 +10,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client as ReqwestClient;
 use std::env;
 use std::fs::File;
-use std::io::{stdin, stdout, Write};
+use std::io::{self, stdin, stdout, Write};
 use std::path::Path;
 use owo_colors::OwoColorize;
 use zip::ZipArchive;
@@ -251,9 +251,58 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
         ZipArchive::new(archive).context("Error opening zip file - file may be corrupted")?;
 
     let unzipped_output_dir = output_dir.join(haxelib.version_as_commas()?);
-    zip_file
-        .extract(&unzipped_output_dir)
-        .context("Error extracting zip file")?;
+
+    // Find the base path by locating the shallowest haxelib.json in the ZIP.
+    // Some haxelib packages nest all files under a wrapper directory (e.g. "release/"),
+    // and we need to strip that prefix to match how `haxelib install` behaves.
+    let base_path = {
+        let mut best: Option<String> = None;
+        let mut best_depth = usize::MAX;
+        for i in 0..zip_file.len() {
+            let entry = zip_file.by_index(i)?;
+            let name = entry.name().replace('\\', "/");
+            if name.ends_with("haxelib.json") {
+                let depth = name.split('/').count();
+                if depth < best_depth || (depth == best_depth && Some(&name) < best.as_ref()) {
+                    best_depth = depth;
+                    best = Some(name[..name.len() - "haxelib.json".len()].to_string());
+                }
+            }
+        }
+        best.unwrap_or_default()
+    };
+
+    // Extract entries, stripping the base_path prefix
+    for i in 0..zip_file.len() {
+        let mut entry = zip_file.by_index(i)?;
+        let full_name = entry.name().replace('\\', "/");
+
+        if !full_name.starts_with(&base_path) {
+            continue;
+        }
+
+        let relative = &full_name[base_path.len()..];
+        if relative.is_empty() {
+            continue;
+        }
+
+        // Reject path traversal
+        if relative.contains("..") {
+            continue;
+        }
+
+        let out_path = unzipped_output_dir.join(relative);
+
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out_path)?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut outfile = File::create(&out_path)?;
+            io::copy(&mut entry, &mut outfile)?;
+        }
+    }
 
     std::fs::remove_file(&tmp_dir)?;
 
