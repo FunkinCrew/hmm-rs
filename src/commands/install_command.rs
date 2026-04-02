@@ -471,11 +471,29 @@ fn smart_checkout_git_ref(haxelib: &Haxelib, repo_path: &Path) -> Result<()> {
         .context("Failed to execute git fetch")?;
 
     if !fetch_result.success() {
-        return Err(anyhow!(
-            "Git fetch failed for {} from {}",
-            haxelib.name,
-            remote_name
-        ));
+        println!(
+            "Standard fetch failed, retrying with {} (skips negotiation)...",
+            "--refetch".cyan()
+        );
+
+        let refetch_result = std::process::Command::new("git")
+            .args([
+                "-C",
+                path_to_str(&repo_path)?,
+                "fetch",
+                "--refetch",
+                &remote_name,
+            ])
+            .status()
+            .context("Failed to execute git fetch --refetch")?;
+
+        if !refetch_result.success() {
+            return Err(anyhow!(
+                "Git fetch failed for {} from {} (tried both standard and --refetch)",
+                haxelib.name,
+                remote_name
+            ));
+        }
     }
 
     // Try checkout again after fetch
@@ -579,6 +597,74 @@ fn parse_remote_name_from_url(url: &str) -> Result<String> {
     Ok(format!("{}/{}", username, repo))
 }
 
+fn is_partial_clone(repo_path: &Path) -> bool {
+    let output = std::process::Command::new("git")
+        .args([
+            "-C",
+            path_to_str(repo_path).unwrap_or("."),
+            "config",
+            "--get-regexp",
+            r"remote\..*\.partialclonefilter",
+        ])
+        .output();
+
+    match output {
+        std::result::Result::Ok(o) => o.status.success(),
+        std::result::Result::Err(_) => false,
+    }
+}
+
+fn configure_remote_as_promisor(repo_path: &Path, remote_name: &str) -> Result<()> {
+    let repo_path_str = path_to_str(repo_path)?;
+
+    let check = std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path_str,
+            "config",
+            &format!("remote.{}.promisor", remote_name),
+        ])
+        .output()
+        .context("Failed to check promisor config")?;
+
+    if check.status.success() {
+        return Ok(());
+    }
+
+    let promisor_result = std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path_str,
+            "config",
+            &format!("remote.{}.promisor", remote_name),
+            "true",
+        ])
+        .status()
+        .context("Failed to set promisor config")?;
+    if !promisor_result.success() {
+        return Err(anyhow!("git config remote.{}.promisor failed", remote_name));
+    }
+
+    let filter_result = std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path_str,
+            "config",
+            &format!("remote.{}.partialclonefilter", remote_name),
+            "blob:none",
+        ])
+        .status()
+        .context("Failed to set partialclonefilter config")?;
+    if !filter_result.success() {
+        return Err(anyhow!(
+            "git config remote.{}.partialclonefilter failed",
+            remote_name
+        ));
+    }
+
+    Ok(())
+}
+
 /// Ensure a git remote exists with the proper name
 fn ensure_git_remote(repo_path: &Path, remote_name: &str, url: &str) -> Result<()> {
     // Check if remote exists
@@ -637,6 +723,10 @@ fn ensure_git_remote(repo_path: &Path, remote_name: &str, url: &str) -> Result<(
         if !add_result.success() {
             return Err(anyhow!("Failed to add remote {}", remote_name));
         }
+    }
+
+    if is_partial_clone(repo_path) {
+        configure_remote_as_promisor(repo_path, remote_name)?;
     }
 
     Ok(())
@@ -1023,5 +1113,85 @@ mod tests {
     fn test_parse_remote_invalid_url() {
         let result = parse_remote_name_from_url("not-a-url");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_is_partial_clone_false_for_regular_repo() {
+        let temp = tempfile::TempDir::new().unwrap();
+        std::process::Command::new("git")
+            .args(["init", temp.path().to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(!is_partial_clone(temp.path()));
+    }
+
+    #[test]
+    fn test_is_partial_clone_true_when_filter_configured() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().to_str().unwrap();
+        std::process::Command::new("git")
+            .args(["init", path])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["-C", path, "remote", "add", "origin", "https://example.com/repo"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["-C", path, "config", "remote.origin.partialclonefilter", "blob:none"])
+            .output()
+            .unwrap();
+        assert!(is_partial_clone(temp.path()));
+    }
+
+    #[test]
+    fn test_configure_remote_as_promisor_sets_config() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().to_str().unwrap();
+        std::process::Command::new("git")
+            .args(["init", path])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["-C", path, "remote", "add", "test-remote", "https://example.com/repo"])
+            .output()
+            .unwrap();
+
+        configure_remote_as_promisor(temp.path(), "test-remote").unwrap();
+
+        let promisor = std::process::Command::new("git")
+            .args(["-C", path, "config", "remote.test-remote.promisor"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&promisor.stdout).trim(), "true");
+
+        let filter = std::process::Command::new("git")
+            .args(["-C", path, "config", "remote.test-remote.partialclonefilter"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&filter.stdout).trim(), "blob:none");
+    }
+
+    #[test]
+    fn test_configure_remote_as_promisor_is_idempotent() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().to_str().unwrap();
+        std::process::Command::new("git")
+            .args(["init", path])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["-C", path, "remote", "add", "test-remote", "https://example.com/repo"])
+            .output()
+            .unwrap();
+
+        configure_remote_as_promisor(temp.path(), "test-remote").unwrap();
+        configure_remote_as_promisor(temp.path(), "test-remote").unwrap();
+
+        let promisor = std::process::Command::new("git")
+            .args(["-C", path, "config", "remote.test-remote.promisor"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&promisor.stdout).trim(), "true");
     }
 }
