@@ -31,31 +31,11 @@ enum ConflictResolution {
     Skip,    // Skip this library
 }
 
-pub fn install_from_hmm(deps: &Dependancies, libs: &Option<Vec<String>>) -> Result<()> {
+pub fn install_from_hmm(deps: &Dependancies, libs: &[String]) -> Result<()> {
     super::init_command::ensure_haxelib_folder()?;
 
-    let filtered_deps;
-    let deps_to_check = match libs {
-        Some(names) => {
-            for name in names {
-                if !deps.dependencies.iter().any(|d| &d.name == name) {
-                    println!("{}: not found in hmm.json, skipping", name.red().bold());
-                }
-            }
-            filtered_deps = Dependancies {
-                dependencies: deps
-                    .dependencies
-                    .iter()
-                    .filter(|d| names.iter().any(|n| n == &d.name))
-                    .cloned()
-                    .collect(),
-            };
-            &filtered_deps
-        }
-        None => deps,
-    };
-
-    let installs_needed = compare_haxelib_to_hmm(deps_to_check)?;
+    let filtered = deps.filter_by_names(libs);
+    let installs_needed = compare_haxelib_to_hmm(&filtered)?;
     println!(
         "{} dependencies need to be installed",
         installs_needed.len().to_string().bold()

@@ -42,32 +42,30 @@ impl<'a> HaxelibStatus<'a> {
     }
 }
 
-pub fn check(deps: &Dependancies) -> Result<()> {
-    match compare_haxelib_to_hmm(deps)? {
-        installs => {
-            println!(
-                "{} / {} dependencie(s) are installed at the correct versions",
-                installs
-                    .iter()
-                    .filter(|i| i.install_type == InstallType::AlreadyInstalled)
-                    .count()
-                    .bold(),
-                deps.dependencies.len().bold()
-            );
-        }
-    }
+pub fn check(deps: &Dependancies, names: &[String]) -> Result<()> {
+    let filtered = deps.filter_by_names(names);
+    let total = filtered.len();
+    let installs = compare_haxelib_to_hmm(&filtered)?;
+    println!(
+        "{} / {} dependencie(s) are installed at the correct versions",
+        installs
+            .iter()
+            .filter(|i| i.install_type == InstallType::AlreadyInstalled)
+            .count()
+            .bold(),
+        total.bold()
+    );
     Ok(())
 }
 
-pub fn compare_haxelib_to_hmm(deps: &Dependancies) -> Result<Vec<HaxelibStatus<'_>>> {
+pub fn compare_haxelib_to_hmm<'a>(haxelibs: &[&'a Haxelib]) -> Result<Vec<HaxelibStatus<'a>>> {
     let mut install_status = Vec::new();
 
-    for haxelib in deps.dependencies.iter() {
+    for &haxelib in haxelibs {
         let haxelib_status = check_dependency(haxelib)?;
         print_install_status(&haxelib_status)?;
 
         install_status.push(haxelib_status);
-        continue;
     }
 
     Ok(install_status)

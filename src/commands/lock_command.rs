@@ -11,26 +11,13 @@ use crate::hmm::json;
 
 pub fn lock_dependencies(
     deps: &Dependancies,
-    libs: &Option<Vec<String>>,
+    libs: &[String],
     json_path: PathBuf,
     long_id: bool,
 ) -> Result<()> {
     let mut updated_deps = deps.clone();
 
-    // Determine which libraries to lock
-    let libs_to_lock: Vec<&Haxelib> = if let Some(lib_names) = libs {
-        // Lock only specified libraries
-        lib_names
-            .iter()
-            .map(|name| {
-                deps.get_haxelib(name)
-                    .map_err(|_| anyhow!("Library '{}' not found in hmm.json", name))
-            })
-            .collect::<Result<Vec<_>>>()?
-    } else {
-        // Lock all libraries
-        deps.dependencies.iter().collect()
-    };
+    let libs_to_lock = deps.filter_by_names(libs);
 
     println!("Locking {} dependencies...", libs_to_lock.len().bold());
 

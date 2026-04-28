@@ -90,3 +90,44 @@ fn check_alias_ch_works() {
         .assert()
         .success();
 }
+
+#[test]
+fn check_filtered_only_processes_named_libs() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "lib-a", "type": "haxelib", "version": "1.0.0"},
+            {"name": "lib-b", "type": "haxelib", "version": "2.0.0"},
+            {"name": "lib-c", "type": "haxelib", "version": "3.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("lib-a", "1.0.0")]);
+
+    // bold ANSI codes wrap each digit; check only structural pieces around it
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["check", "lib-a"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dependencie(s) are installed"))
+        .stdout(predicate::str::contains("Checking lib-b").not())
+        .stdout(predicate::str::contains("Checking lib-c").not());
+}
+
+#[test]
+fn check_unknown_lib_warns() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "lib-a", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("lib-a", "1.0.0")]);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["check", "nonexistent"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("not found in hmm.json"));
+}

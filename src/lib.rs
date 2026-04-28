@@ -23,16 +23,23 @@ struct Cli {
     global_opts: GlobalOpts,
 }
 
+/// Optional list of library names to scope a command to a subset of `hmm.json` deps.
+/// Empty means: apply to all dependencies. Names not in `hmm.json` print a warning and are skipped.
+#[derive(Debug, Args, Clone)]
+pub struct LibraryFilter {
+    /// Library names to operate on. If omitted, applies to all dependencies in hmm.json.
+    #[arg(value_name = "LIBS")]
+    pub lib: Vec<String>,
+}
+
 #[derive(Subcommand, Debug, Clone)]
 enum Commands {
     /// Lists the dependencies in the hmm.json file (or a file of your choice with --path)
     /// use `hmm-rs check` to see if the dependencies are installed at the correct versions
     #[command(visible_alias = "ls")]
     List {
-        /// Specific libraries you want to list, can be multiple
-        /// `hmm-rs list lime openfl` will list lime and openfl
-        #[arg(value_name = "LIBS")]
-        lib: Option<Vec<String>>,
+        #[command(flatten)]
+        filter: LibraryFilter,
     },
     /// Creates an empty .haxelib/ folder, and an empty hmm.json file
     Init,
@@ -45,25 +52,26 @@ enum Commands {
         #[arg(value_name = "HXML")]
         hxml: Option<PathBuf>,
     },
-    /// Checks if the dependencies are installed at their correct hmm.json versions
+    /// Checks if the dependencies are installed at their correct hmm.json versions.
+    /// Optionally specify library names to check only those.
     #[command(visible_alias = "ch")]
-    Check,
+    Check {
+        #[command(flatten)]
+        filter: LibraryFilter,
+    },
     /// Installs the dependencies from hmm.json, if they aren't already installed.
     /// Optionally specify library names to install only those.
     #[command(visible_alias = "i")]
     Install {
-        /// Specific libraries to install. If omitted, installs all dependencies.
-        /// `hmm-rs install flixel lime` will only install flixel and lime
-        #[arg(value_name = "LIBS")]
-        lib: Option<Vec<String>>,
+        #[command(flatten)]
+        filter: LibraryFilter,
     },
     Add(AddArgs),
-    /// Installs a haxelib from lib.haxe.org
+    /// Installs one or more haxelibs from lib.haxe.org. Each name may be `lib` or `lib@version`.
     Haxelib {
-        /// The name of the haxelib to install
-        name: String,
-        /// The version of the haxelib to install
-        version: Option<String>,
+        /// Library specs to install. Each is `name` or `name@version` (e.g. `lime` or `lime@5.0.0`).
+        #[arg(required = true, num_args = 1..)]
+        names: Vec<String>,
     },
     /// Installs a library from a git repository
     Git {
@@ -78,9 +86,8 @@ enum Commands {
     /// Removes one or more library dependencies from `hmm.json` and the `.haxelib/` folder
     #[command(visible_alias = "rm")]
     Remove {
-        /// The library(s) you wish to remove, can be multiple
-        #[arg(value_name = "LIBS")]
-        lib: Vec<String>,
+        #[command(flatten)]
+        filter: LibraryFilter,
     },
     /// Adds a local development dependency to hmm.json
     Dev {
@@ -105,21 +112,21 @@ enum Commands {
         #[arg(short = 'l', long = "long-id")]
         long_id: bool,
 
-        /// Specific libraries you want to lock, can be multiple
-        /// `hmm-rs lock lime openfl` will lock lime and openfl
-        #[arg(value_name = "LIBS")]
-        lib: Option<Vec<String>>,
+        #[command(flatten)]
+        filter: LibraryFilter,
     },
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct AddArgs {
-    name: String,
+    /// One or more library names. With `--git URL`, exactly one name is required.
+    #[arg(required = true, num_args = 1..)]
+    pub names: Vec<String>,
     #[arg(long, value_name = "URL")]
-    git: Option<String>,
-    /// Optional git ref (branch, tag, or commit SHA). If not specified, uses default branch when used with the --git flag
-    #[arg(value_name = "REF")]
-    git_ref: Option<String>,
+    pub git: Option<String>,
+    /// Optional git ref (branch, tag, or commit SHA), used with `--git`. If not specified, uses default branch.
+    #[arg(long = "ref", value_name = "REF")]
+    pub git_ref: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -157,21 +164,23 @@ pub fn run() -> Result<()> {
 
     match args.cmd {
         Commands::Add(add_args) => add_command::add_dependency(add_args, load_deps()?, path)?,
-        Commands::List { lib } => hmm::json::read_json(&path)?.print_string_list(&lib)?,
+        Commands::List { filter } => hmm::json::read_json(&path)?.print_string_list(&filter.lib)?,
         Commands::Init => commands::init_command::init_hmm()?,
         Commands::Clean => commands::clean_command::remove_haxelib_folder()?,
         Commands::ToHxml { hxml } => commands::tohxml_command::dump_to_hxml(&load_deps()?, hxml)?,
-        Commands::Check => commands::check_command::check(&load_deps()?)?,
-        Commands::Install { lib } => {
-            commands::install_command::install_from_hmm(&load_deps()?, &lib)?
+        Commands::Check { filter } => commands::check_command::check(&load_deps()?, &filter.lib)?,
+        Commands::Install { filter } => {
+            commands::install_command::install_from_hmm(&load_deps()?, &filter.lib)?
         }
-        Commands::Haxelib { name, version } => {
-            commands::haxelib_command::install_haxelib(&name, &version, load_deps()?, path)?
+        Commands::Haxelib { names } => {
+            commands::haxelib_command::install_haxelibs(&names, load_deps()?, path)?
         }
         Commands::Git { name, url, git_ref } => {
             commands::git_command::install_git(&name, &url, &git_ref, load_deps()?, path)?
         }
-        Commands::Remove { lib: _ } => commands::remove_command::remove_haxelibs()?,
+        Commands::Remove { filter } => {
+            commands::remove_command::remove_haxelibs(load_deps()?, &filter.lib, path)?
+        }
         Commands::Upgrade { check } => commands::upgrade_command::upgrade(check)?,
         Commands::Dev { name, path } => commands::dev_command::add_dev_dependency(
             &name,
@@ -182,12 +191,12 @@ pub fn run() -> Result<()> {
         Commands::Lock {
             subcommand,
             long_id,
-            lib,
+            filter,
         } => match subcommand {
             Some(LockCommands::Check) => commands::lock_command::check_locked(&load_deps()?)?,
             None => commands::lock_command::lock_dependencies(
                 &load_deps()?,
-                &lib,
+                &filter.lib,
                 args.global_opts.json.unwrap(),
                 long_id,
             )?,

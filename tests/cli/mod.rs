@@ -1,3 +1,4 @@
+mod add;
 mod check;
 mod clean;
 mod dev;
