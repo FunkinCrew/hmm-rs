@@ -31,6 +31,7 @@ pub fn install_git(
     git_ref: &Option<String>,
     mut deps: Dependancies,
     json_path: PathBuf,
+    separator: &str,
 ) -> Result<()> {
     // Check if library already exists in dependencies
     if let Some(existing) = deps.dependencies.iter().find(|lib| lib.name == name) {
@@ -59,7 +60,7 @@ pub fn install_git(
     }
 
     // Install the git repository
-    commands::install_command::install_or_update_git_cli(&haxelib_install)?;
+    commands::install_command::install_or_update_git_cli(&haxelib_install, separator)?;
 
     // If we didn't have a ref, get the current HEAD after clone
     if haxelib_install.vcs_ref.is_none() {

@@ -8,7 +8,12 @@ use crate::{
     AddArgs,
 };
 
-pub fn add_dependency(add_args: AddArgs, deps: Dependancies, path: PathBuf) -> Result<()> {
+pub fn add_dependency(
+    add_args: AddArgs,
+    deps: Dependancies,
+    path: PathBuf,
+    separator: &str,
+) -> Result<()> {
     match &add_args.git {
         Some(git_url) => {
             if add_args.names.len() != 1 {
@@ -23,6 +28,7 @@ pub fn add_dependency(add_args: AddArgs, deps: Dependancies, path: PathBuf) -> R
                 &add_args.git_ref,
                 deps,
                 path,
+                separator,
             )?;
         }
         None => {

@@ -18,6 +18,24 @@ use zip::ZipArchive;
 use super::check_command::compare_haxelib_to_hmm;
 use super::check_command::HaxelibStatus;
 
+pub const DEFAULT_REMOTE_SEPARATOR: &str = ".";
+
+/// Resolve the remote-name separator: CLI flag > $HMM_REMOTE_SEPARATOR > default.
+/// Empty strings are treated as "not set" and fall through.
+pub fn resolve_remote_separator(flag: Option<&str>) -> String {
+    if let Some(s) = flag {
+        if !s.is_empty() {
+            return s.to_string();
+        }
+    }
+    if let std::result::Result::Ok(s) = env::var("HMM_REMOTE_SEPARATOR") {
+        if !s.is_empty() {
+            return s;
+        }
+    }
+    DEFAULT_REMOTE_SEPARATOR.to_string()
+}
+
 fn path_to_str(path: &Path) -> Result<&str> {
     path.to_str()
         .ok_or_else(|| anyhow!("Path contains invalid UTF-8: {}", path.display()))
@@ -31,7 +49,7 @@ enum ConflictResolution {
     Skip,    // Skip this library
 }
 
-pub fn install_from_hmm(deps: &Dependancies, libs: &[String]) -> Result<()> {
+pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -> Result<()> {
     super::init_command::ensure_haxelib_folder()?;
 
     let filtered = deps.filter_by_names(libs);
@@ -43,11 +61,11 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String]) -> Result<()> {
 
     for install_status in installs_needed.iter() {
         match &install_status.install_type {
-            InstallType::Missing => handle_install(install_status)?,
-            InstallType::MissingGit => handle_install(install_status)?,
+            InstallType::Missing => handle_install(install_status, separator)?,
+            InstallType::MissingGit => handle_install(install_status, separator)?,
             InstallType::Outdated => match &install_status.lib.haxelib_type {
                 HaxelibType::Haxelib => install_from_haxelib(install_status.lib)?,
-                HaxelibType::Git => install_or_update_git_cli(install_status.lib)?,
+                HaxelibType::Git => install_or_update_git_cli(install_status.lib, separator)?,
                 lib_type => println!(
                     "{}: Installing from {:?} not yet implemented",
                     install_status.lib.name.red(),
@@ -56,7 +74,7 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String]) -> Result<()> {
             },
             InstallType::Conflict => {
                 // Handle git conflicts interactively
-                handle_git_conflict(install_status)?;
+                handle_git_conflict(install_status, separator)?;
             }
             InstallType::AlreadyInstalled => (), // do nothing on things already installed at the right version
             _ => println!(
@@ -69,10 +87,10 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_install(haxelib_status: &HaxelibStatus) -> Result<()> {
+pub fn handle_install(haxelib_status: &HaxelibStatus, separator: &str) -> Result<()> {
     match &haxelib_status.lib.haxelib_type {
         HaxelibType::Haxelib => install_from_haxelib(haxelib_status.lib)?,
-        HaxelibType::Git => install_or_update_git_cli(haxelib_status.lib)?,
+        HaxelibType::Git => install_or_update_git_cli(haxelib_status.lib, separator)?,
         lib_type => println!(
             "{}: Installing from {:?} not yet implemented",
             haxelib_status.lib.name.red(),
@@ -345,7 +363,7 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
 /// - Uses blobless clone (--filter=blob:none) for fast initial download with full history
 /// - Smart checkout: tries local first, fetches only if commit not found
 /// - Properly handles submodules with --init --recursive
-pub fn install_or_update_git_cli(haxelib: &Haxelib) -> Result<()> {
+pub fn install_or_update_git_cli(haxelib: &Haxelib, separator: &str) -> Result<()> {
     let git_dir_path = haxelib.git_repo_path();
     let parent_dir = haxelib.lib_dir_path();
 
@@ -355,7 +373,7 @@ pub fn install_or_update_git_cli(haxelib: &Haxelib) -> Result<()> {
             "Cloning {} (blobless for speed + full history)...",
             haxelib.name
         );
-        clone_blobless_git_repo(haxelib, &git_dir_path)?;
+        clone_blobless_git_repo(haxelib, &git_dir_path, separator)?;
 
         // Create .current file indicating this is a git install
         create_current_file(&parent_dir, &String::from("git"))?;
@@ -365,7 +383,7 @@ pub fn install_or_update_git_cli(haxelib: &Haxelib) -> Result<()> {
 
     // Checkout the specified commit/ref (if provided)
     if haxelib.vcs_ref.is_some() {
-        smart_checkout_git_ref(haxelib, &git_dir_path)?;
+        smart_checkout_git_ref(haxelib, &git_dir_path, separator)?;
     } else {
         println!("No ref specified, using repository's default branch");
     }
@@ -379,7 +397,7 @@ pub fn install_or_update_git_cli(haxelib: &Haxelib) -> Result<()> {
 
 /// Clone with --filter=blob:none for fast download with full commit history
 /// Falls back to regular clone if blobless is not supported
-fn clone_blobless_git_repo(haxelib: &Haxelib, target_path: &Path) -> Result<()> {
+fn clone_blobless_git_repo(haxelib: &Haxelib, target_path: &Path, separator: &str) -> Result<()> {
     let url = haxelib.url()?;
 
     // Try blobless clone first (fast, full history)
@@ -411,21 +429,21 @@ fn clone_blobless_git_repo(haxelib: &Haxelib, target_path: &Path) -> Result<()> 
     }
 
     // Parse remote name from URL and rename origin
-    let remote_name = parse_remote_name_from_url(url)?;
+    let remote_name = parse_remote_name_from_url(url, separator)?;
     rename_origin_remote(target_path, &remote_name)?;
 
     Ok(())
 }
 
 /// Smart checkout: try local first, fetch if commit not found
-fn smart_checkout_git_ref(haxelib: &Haxelib, repo_path: &Path) -> Result<()> {
+fn smart_checkout_git_ref(haxelib: &Haxelib, repo_path: &Path, separator: &str) -> Result<()> {
     let target_ref = haxelib.vcs_ref()?;
     let url = haxelib.url()?;
 
     println!("Checking out {} at {}...", haxelib.name, target_ref);
 
     // Ensure remote exists with correct name and URL
-    let remote_name = parse_remote_name_from_url(url)?;
+    let remote_name = parse_remote_name_from_url(url, separator)?;
     ensure_git_remote(repo_path, &remote_name, url)?;
 
     // Try to checkout locally first
@@ -532,8 +550,8 @@ fn print_success(haxelib: &Haxelib) -> Result<()> {
     Ok(())
 }
 
-/// Parse a remote name from a git URL (format: username/repo)
-fn parse_remote_name_from_url(url: &str) -> Result<String> {
+/// Parse a remote name from a git URL (format: username<sep>repo).
+fn parse_remote_name_from_url(url: &str, separator: &str) -> Result<String> {
     // Handle various URL formats:
     // https://github.com/user/repo.git
     // https://github.com/user/repo
@@ -574,7 +592,7 @@ fn parse_remote_name_from_url(url: &str) -> Result<String> {
     // Remove .git suffix if present
     repo = repo.trim_end_matches(".git");
 
-    Ok(format!("{}/{}", username, repo))
+    Ok(format!("{}{}{}", username, separator, repo))
 }
 
 fn is_partial_clone(repo_path: &Path) -> bool {
@@ -752,7 +770,7 @@ fn rename_origin_remote(repo_path: &Path, new_name: &str) -> Result<()> {
 }
 
 /// Handle a git conflict by prompting user and executing their choice
-fn handle_git_conflict(haxelib_status: &HaxelibStatus) -> Result<()> {
+fn handle_git_conflict(haxelib_status: &HaxelibStatus, separator: &str) -> Result<()> {
     let haxelib = haxelib_status.lib;
     let repo_path = haxelib.git_repo_path();
 
@@ -762,16 +780,16 @@ fn handle_git_conflict(haxelib_status: &HaxelibStatus) -> Result<()> {
     match choice {
         ConflictResolution::Stash => {
             git_stash_push(&repo_path, haxelib)?;
-            install_or_update_git_cli(haxelib)?;
+            install_or_update_git_cli(haxelib, separator)?;
             git_stash_pop(&repo_path, haxelib)?;
         }
         ConflictResolution::Discard => {
             git_discard_changes(&repo_path, haxelib)?;
-            install_or_update_git_cli(haxelib)?;
+            install_or_update_git_cli(haxelib, separator)?;
         }
         ConflictResolution::Commit => {
             git_commit_changes(&repo_path, haxelib)?;
-            install_or_update_git_cli(haxelib)?;
+            install_or_update_git_cli(haxelib, separator)?;
         }
         ConflictResolution::Skip => {
             println!("Skipping {}", haxelib.name.yellow());
@@ -1061,38 +1079,83 @@ mod tests {
 
     #[test]
     fn test_parse_remote_https_with_git_suffix() {
-        let result = parse_remote_name_from_url("https://github.com/haxeflixel/flixel.git");
-        assert_eq!(result.unwrap(), "haxeflixel/flixel");
+        let result = parse_remote_name_from_url("https://github.com/haxeflixel/flixel.git", ".");
+        assert_eq!(result.unwrap(), "haxeflixel.flixel");
     }
 
     #[test]
     fn test_parse_remote_https_without_git_suffix() {
-        let result = parse_remote_name_from_url("https://github.com/haxeflixel/flixel");
-        assert_eq!(result.unwrap(), "haxeflixel/flixel");
+        let result = parse_remote_name_from_url("https://github.com/haxeflixel/flixel", ".");
+        assert_eq!(result.unwrap(), "haxeflixel.flixel");
     }
 
     #[test]
     fn test_parse_remote_ssh_colon_format() {
-        let result = parse_remote_name_from_url("git@github.com:user/repo.git");
-        assert_eq!(result.unwrap(), "user/repo");
+        let result = parse_remote_name_from_url("git@github.com:user/repo.git", ".");
+        assert_eq!(result.unwrap(), "user.repo");
     }
 
     #[test]
     fn test_parse_remote_ssh_protocol() {
-        let result = parse_remote_name_from_url("ssh://git@github.com/user/repo.git");
-        assert_eq!(result.unwrap(), "user/repo");
+        let result = parse_remote_name_from_url("ssh://git@github.com/user/repo.git", ".");
+        assert_eq!(result.unwrap(), "user.repo");
     }
 
     #[test]
     fn test_parse_remote_http() {
-        let result = parse_remote_name_from_url("http://github.com/FunkinCrew/funkVis");
-        assert_eq!(result.unwrap(), "FunkinCrew/funkVis");
+        let result = parse_remote_name_from_url("http://github.com/FunkinCrew/funkVis", ".");
+        assert_eq!(result.unwrap(), "FunkinCrew.funkVis");
     }
 
     #[test]
     fn test_parse_remote_invalid_url() {
-        let result = parse_remote_name_from_url("not-a-url");
+        let result = parse_remote_name_from_url("not-a-url", ".");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_remote_with_dash_separator() {
+        let result = parse_remote_name_from_url("https://github.com/haxeflixel/flixel.git", "-");
+        assert_eq!(result.unwrap(), "haxeflixel-flixel");
+    }
+
+    #[test]
+    fn test_parse_remote_with_double_underscore_separator() {
+        let result = parse_remote_name_from_url("git@github.com:user/repo.git", "__");
+        assert_eq!(result.unwrap(), "user__repo");
+    }
+
+    #[test]
+    fn test_resolve_separator_flag_wins_when_non_empty() {
+        // Non-empty flag short-circuits before any env read, so this is safe to run in parallel.
+        assert_eq!(resolve_remote_separator(Some("-")), "-");
+        assert_eq!(resolve_remote_separator(Some("__")), "__");
+    }
+
+    #[test]
+    fn test_resolve_separator_env_and_default() {
+        // This test mutates HMM_REMOTE_SEPARATOR. Keep all env-var-reading
+        // resolver assertions inside this single test so they don't race with
+        // each other under cargo's parallel runner.
+        let prior = env::var("HMM_REMOTE_SEPARATOR").ok();
+
+        env::remove_var("HMM_REMOTE_SEPARATOR");
+        assert_eq!(resolve_remote_separator(None), DEFAULT_REMOTE_SEPARATOR);
+        assert_eq!(resolve_remote_separator(Some("")), DEFAULT_REMOTE_SEPARATOR);
+
+        env::set_var("HMM_REMOTE_SEPARATOR", "_");
+        assert_eq!(resolve_remote_separator(None), "_");
+        assert_eq!(resolve_remote_separator(Some("")), "_");
+        // Non-empty flag still wins over env var.
+        assert_eq!(resolve_remote_separator(Some("-")), "-");
+
+        env::set_var("HMM_REMOTE_SEPARATOR", "");
+        assert_eq!(resolve_remote_separator(None), DEFAULT_REMOTE_SEPARATOR);
+
+        match prior {
+            Some(v) => env::set_var("HMM_REMOTE_SEPARATOR", v),
+            None => env::remove_var("HMM_REMOTE_SEPARATOR"),
+        }
     }
 
     #[test]

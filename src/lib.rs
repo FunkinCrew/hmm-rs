@@ -140,6 +140,10 @@ struct GlobalOpts {
     /// Verbosity level (can be specified multiple times, -v or -vvvv)
     #[arg(long, short, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
+    /// Separator used in git remote names derived from URLs (default: ".").
+    /// Falls back to $HMM_REMOTE_SEPARATOR if unset.
+    #[arg(long, global = true, value_name = "SEP")]
+    remote_separator: Option<String>,
     //... other global options
 }
 
@@ -161,23 +165,35 @@ pub fn run() -> Result<()> {
 
     let path = args.global_opts.json.clone().unwrap();
     let load_deps = || hmm::json::read_json(&path);
+    let remote_separator = commands::install_command::resolve_remote_separator(
+        args.global_opts.remote_separator.as_deref(),
+    );
 
     match args.cmd {
-        Commands::Add(add_args) => add_command::add_dependency(add_args, load_deps()?, path)?,
+        Commands::Add(add_args) => {
+            add_command::add_dependency(add_args, load_deps()?, path, &remote_separator)?
+        }
         Commands::List { filter } => hmm::json::read_json(&path)?.print_string_list(&filter.lib)?,
         Commands::Init => commands::init_command::init_hmm()?,
         Commands::Clean => commands::clean_command::remove_haxelib_folder()?,
         Commands::ToHxml { hxml } => commands::tohxml_command::dump_to_hxml(&load_deps()?, hxml)?,
         Commands::Check { filter } => commands::check_command::check(&load_deps()?, &filter.lib)?,
-        Commands::Install { filter } => {
-            commands::install_command::install_from_hmm(&load_deps()?, &filter.lib)?
-        }
+        Commands::Install { filter } => commands::install_command::install_from_hmm(
+            &load_deps()?,
+            &filter.lib,
+            &remote_separator,
+        )?,
         Commands::Haxelib { names } => {
             commands::haxelib_command::install_haxelibs(&names, load_deps()?, path)?
         }
-        Commands::Git { name, url, git_ref } => {
-            commands::git_command::install_git(&name, &url, &git_ref, load_deps()?, path)?
-        }
+        Commands::Git { name, url, git_ref } => commands::git_command::install_git(
+            &name,
+            &url,
+            &git_ref,
+            load_deps()?,
+            path,
+            &remote_separator,
+        )?,
         Commands::Remove { filter } => {
             commands::remove_command::remove_haxelibs(load_deps()?, &filter.lib, path)?
         }
