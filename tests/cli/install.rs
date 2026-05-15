@@ -170,6 +170,10 @@ fn install_selective_already_installed() {
         .args(["install", "flixel"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("flixel"))
-        .stdout(predicate::str::contains("Checking lime").not());
+        // Quiet mode: already-installed libs produce no per-lib output.
+        .stdout(predicate::str::contains("Checking flixel").not())
+        .stdout(predicate::str::contains("is installed").not())
+        // Non-selected lib should not be touched either.
+        .stdout(predicate::str::contains("Checking lime").not())
+        .stdout(predicate::str::contains("lime").not());
 }

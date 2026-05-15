@@ -45,7 +45,7 @@ impl<'a> HaxelibStatus<'a> {
 pub fn check(deps: &Dependancies, names: &[String]) -> Result<()> {
     let filtered = deps.filter_by_names(names);
     let total = filtered.len();
-    let installs = compare_haxelib_to_hmm(&filtered)?;
+    let installs = compare_haxelib_to_hmm(&filtered, true)?;
     println!(
         "{} / {} dependencie(s) are installed at the correct versions",
         installs
@@ -58,12 +58,32 @@ pub fn check(deps: &Dependancies, names: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn compare_haxelib_to_hmm<'a>(haxelibs: &[&'a Haxelib]) -> Result<Vec<HaxelibStatus<'a>>> {
+pub fn compare_haxelib_to_hmm<'a>(
+    haxelibs: &[&'a Haxelib],
+    verbose: bool,
+) -> Result<Vec<HaxelibStatus<'a>>> {
     let mut install_status = Vec::new();
 
     for &haxelib in haxelibs {
+        if verbose {
+            // transient progress line, cleared once the check below completes
+            println!(
+                "Checking {} {}",
+                haxelib.name.bold().yellow(),
+                Emoji("🤔", "[...]")
+            );
+        }
+
         let haxelib_status = check_dependency(haxelib)?;
-        print_install_status(&haxelib_status)?;
+
+        if verbose {
+            // clear the "Checking ..." progress line, then show the result
+            print!("\x1B[1A\x1B[2K");
+            print_install_status(&haxelib_status)?;
+        } else if haxelib_status.install_type != InstallType::AlreadyInstalled {
+            // quiet mode: only report libs that need attention
+            print_install_status(&haxelib_status)?;
+        }
 
         install_status.push(haxelib_status);
     }
@@ -74,12 +94,6 @@ pub fn compare_haxelib_to_hmm<'a>(haxelibs: &[&'a Haxelib]) -> Result<Vec<Haxeli
 fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
     let lib_path = haxelib.lib_dir_path();
 
-    // assumes an error will occur, and if not, this line will be rewritten at the end of the for loop
-    println!(
-        "Checking {} {}",
-        haxelib.name.bold().yellow(),
-        Emoji("🤔", "[...]")
-    );
     if !lib_path.exists() {
         return Ok(HaxelibStatus::new(
             haxelib,
@@ -223,8 +237,6 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
 }
 
 fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
-    // Clears the terminal
-    print!("\x1B[1A\x1B[2K");
     match haxelib_status.install_type {
         InstallType::Missing => {
             println!(

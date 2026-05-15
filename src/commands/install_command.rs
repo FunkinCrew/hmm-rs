@@ -53,7 +53,7 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -
     super::init_command::ensure_haxelib_folder()?;
 
     let filtered = deps.filter_by_names(libs);
-    let installs_needed = compare_haxelib_to_hmm(&filtered)?;
+    let installs_needed = compare_haxelib_to_hmm(&filtered, false)?;
     println!(
         "{} dependencies need to be installed",
         installs_needed.len().to_string().bold()
