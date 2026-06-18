@@ -101,71 +101,6 @@ pub fn handle_install(haxelib_status: &HaxelibStatus, separator: &str) -> Result
     Ok(())
 }
 
-// Preserved for reference - replaced with CLI implementation below
-// pub fn install_from_git_using_gix_clone(haxelib: &Haxelib) -> Result<()> {
-//     println!("Installing {} from git using clone", haxelib.name);
-//
-//     let path_with_no_https = haxelib.url().replace("https://", "");
-//
-//     let clone_url = GixUrl::from_parts(
-//         gix::url::Scheme::Https,
-//         None,
-//         None,
-//         None,
-//         None,
-//         BString::from(path_with_no_https),
-//         false,
-//     )
-//     .context(format!("error creating gix url for {}", haxelib.url()))?;
-//
-//     let mut clone_path = PathBuf::from(".haxelib").join(&haxelib.name);
-//
-//     create_current_file(&clone_path, &String::from("git"))?;
-//
-//     clone_path = clone_path.join("git");
-//
-//     if let Err(e) = std::fs::create_dir_all(&clone_path) {
-//         if e.kind() == std::io::ErrorKind::AlreadyExists {
-//             println!("Directory already exists: {:?}", clone_path.as_path());
-//         } else {
-//             return Err(anyhow!(
-//                 "Error creating directory: {:?}",
-//                 clone_path.as_path()
-//             ));
-//         }
-//     };
-//
-//     let mut da_fetch = clone::PrepareFetch::new(
-//         clone_url,
-//         clone_path,
-//         create::Kind::WithWorktree,
-//         create::Options::default(),
-//         gix::open::Options::default(),
-//     )
-//     .context("error preparing clone")?;
-//
-//     let repo = da_fetch
-//         .fetch_then_checkout(Discard, &AtomicBool::new(false))?
-//         .0
-//         .main_worktree(Discard, &AtomicBool::new(false))
-//         .expect("Error checking out worktree")
-//         .0;
-//
-//     let submodule_result = repo.submodules()?;
-//
-//     if let Some(submodule_list) = submodule_result {
-//         for submodule in submodule_list {
-//             let submodule_path = submodule.path()?;
-//             let submodule_url = submodule.url()?;
-//             println!("Submodule: {} - {}", submodule_path, submodule_url);
-//         }
-//     }
-//
-//     do_commit_checkout(&repo, haxelib)?;
-//
-//     Ok(())
-// }
-
 #[tokio::main]
 pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
     println!(
@@ -307,57 +242,6 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
     print_success(haxelib)?;
     Ok(())
 }
-
-// Preserved for reference - replaced with CLI implementation below
-// pub fn install_from_git_using_gix_checkout(haxelib: &Haxelib) -> Result<()> {
-//     println!("Updating {} from git using checkout", haxelib.name);
-//
-//     let discover_result = gix::discover(
-//         Path::new(".haxelib")
-//             .join(haxelib.name.as_str())
-//             .join("git"),
-//     );
-//
-//     let repo = match discover_result {
-//         core::result::Result::Ok(r) => r,
-//         Err(e) => {
-//             if e.to_string().contains("not a git repository") {
-//                 return install_from_git_using_gix_clone(haxelib);
-//             } else {
-//                 return Err(anyhow!("Error discovering git repo: {:?}", e));
-//             }
-//         }
-//     };
-//
-//     // let fetch_url = repo
-//     //     .find_fetch_remote(None)?
-//     //     .url(gix::remote::Direction::Fetch)
-//     //     .unwrap()
-//     //     .clone();
-//
-//     do_commit_checkout(&repo, haxelib)?;
-//
-//     print_success(haxelib)?;
-//     Ok(())
-// }
-
-// Preserved for reference - replaced with CLI implementation below
-// fn do_commit_checkout(repo: &gix::Repository, haxelib: &Haxelib) -> Result<()> {
-//     print!("Checking out {}", haxelib.name);
-//     if let Some(target_ref) = haxelib.vcs_ref.as_ref() {
-//         println!(" at {}", target_ref);
-//         let reflog_msg = BString::from("derp?");
-//
-//         let target_gix_ref = repo.find_reference(target_ref)?.id();
-//
-//         repo.head_ref()
-//             .unwrap()
-//             .unwrap()
-//             .set_target_id(target_gix_ref, reflog_msg)?;
-//     }
-//
-//     Ok(())
-// }
 
 /// Unified git installer using git CLI for optimal performance and reliability
 /// - Uses blobless clone (--filter=blob:none) for fast initial download with full history
