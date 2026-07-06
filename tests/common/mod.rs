@@ -51,3 +51,36 @@ pub fn project_with_installed_haxelibs(json: &str, libs: &[(&str, &str)]) -> Tem
 pub fn sample_fixture_content(name: &str) -> String {
     std::fs::read_to_string(get_samples_dir().join(name)).unwrap()
 }
+
+fn run_git(repo: &std::path::Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .args(["-C", repo.to_str().unwrap()])
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {:?} failed", args);
+}
+
+pub fn local_git_repo_with_lib_subdir(subdir: &str) -> (TempDir, PathBuf) {
+    let temp = TempDir::new().unwrap();
+    let repo_path = temp.path().join("host").join("mylib-repo");
+    std::fs::create_dir_all(repo_path.join(subdir)).unwrap();
+    std::fs::write(repo_path.join("README.md"), "root\n").unwrap();
+    std::fs::write(
+        repo_path.join(subdir).join("haxelib.json"),
+        "{\"name\":\"mylib\"}\n",
+    )
+    .unwrap();
+
+    run_git(&repo_path, &["init", "-q", "-b", "main"]);
+    run_git(&repo_path, &["config", "user.email", "test@example.com"]);
+    run_git(&repo_path, &["config", "user.name", "test"]);
+    run_git(&repo_path, &["add", "-A"]);
+    run_git(&repo_path, &["commit", "-qm", "init"]);
+    (temp, repo_path)
+}
+
+/// Returns a `file://` clone URL for a local repo path.
+pub fn file_url(path: &std::path::Path) -> String {
+    format!("file://{}", path.to_str().unwrap())
+}

@@ -2,6 +2,7 @@ mod add;
 mod check;
 mod clean;
 mod dev;
+mod git;
 mod init;
 mod install;
 mod list;

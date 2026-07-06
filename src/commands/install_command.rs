@@ -63,6 +63,7 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -
         match &install_status.install_type {
             InstallType::Missing => handle_install(install_status, separator)?,
             InstallType::MissingGit => handle_install(install_status, separator)?,
+            InstallType::MissingDevLink => ensure_git_subdir_dev_link(install_status.lib)?,
             InstallType::Outdated => match &install_status.lib.haxelib_type {
                 HaxelibType::Haxelib => install_from_haxelib(install_status.lib)?,
                 HaxelibType::Git => install_or_update_git_cli(install_status.lib, separator)?,
@@ -274,6 +275,9 @@ pub fn install_or_update_git_cli(haxelib: &Haxelib, separator: &str) -> Result<(
 
     // Update submodules to match the checked out commit
     update_git_submodules(&git_dir_path)?;
+
+    // If a subdirectory is configured, point a `.dev` marker into it.
+    ensure_git_subdir_dev_link(haxelib)?;
 
     print_success(haxelib)?;
     Ok(())
@@ -954,6 +958,36 @@ pub fn create_current_file(path: &Path, content: &String) -> Result<()> {
     std::fs::create_dir_all(path)?;
     let mut current_version_file = File::create(path.join(".current"))?;
     write!(current_version_file, "{}", content)?;
+    Ok(())
+}
+
+/// If the git dependency specifies a subdirectory (`dir`), set up a dev link so that
+/// `-lib <name>` resolves to `.haxelib/<name>/git/<dir>/`. This mirrors real haxelib,
+/// which sets a dev path to `<versionPath>/<subDir>` for subdirectory git installs.
+pub fn ensure_git_subdir_dev_link(haxelib: &Haxelib) -> Result<()> {
+    let subdir = match haxelib.dir.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        Some(d) => d,
+        None => return Ok(()), // no subdir: nothing to do
+    };
+
+    let abs_git = std::fs::canonicalize(haxelib.git_repo_path())
+        .with_context(|| format!("Failed to resolve git repo path for {}", haxelib.name))?;
+    let abs_subdir = abs_git.join(subdir);
+
+    if !abs_subdir.exists() {
+        println!(
+            "{}: subdirectory '{}' was not found in the repo; the dev path may be invalid",
+            haxelib.name.yellow(),
+            subdir
+        );
+    }
+
+    crate::commands::dev_command::write_dev_file(&haxelib.name, &abs_subdir)?;
+    println!(
+        "{}: development directory set to {}",
+        haxelib.name.green().bold(),
+        abs_subdir.display()
+    );
     Ok(())
 }
 

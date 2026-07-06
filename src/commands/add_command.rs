@@ -26,6 +26,7 @@ pub fn add_dependency(
                 &add_args.names[0],
                 git_url.as_str(),
                 &add_args.git_ref,
+                &add_args.dir,
                 deps,
                 path,
                 separator,

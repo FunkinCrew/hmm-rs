@@ -2,9 +2,13 @@
   "dependencies": [
     {
       "name": "FlxPartialSound",
-      "type": "dev",
-      "dir": null,
-      "path": "../FlxPartialSound"
+      "path": "../FlxPartialSound",
+      "type": "dev"
+    },
+    {
+      "name": "hxcpp-debug-server",
+      "path": ".haxelib/hxcpp-debug-server/git/hxcpp-debug-server/",
+      "type": "dev"
     }
   ]
 }

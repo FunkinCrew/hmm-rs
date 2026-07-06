@@ -82,6 +82,9 @@ enum Commands {
         /// Optional git ref (branch, tag, or commit SHA). If not specified, uses default branch
         #[arg(value_name = "REF")]
         git_ref: Option<String>,
+        /// Optional subdirectory in the repo where the library (haxelib.json) lives
+        #[arg(value_name = "DIR")]
+        dir: Option<String>,
     },
     /// Removes one or more library dependencies from `hmm.json` and the `.haxelib/` folder
     #[command(visible_alias = "rm")]
@@ -127,6 +130,9 @@ pub struct AddArgs {
     /// Optional git ref (branch, tag, or commit SHA), used with `--git`. If not specified, uses default branch.
     #[arg(long = "ref", value_name = "REF")]
     pub git_ref: Option<String>,
+    /// Optional subdirectory in the repo where the library lives, used with `--git`.
+    #[arg(long = "dir", value_name = "DIR")]
+    pub dir: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -186,10 +192,16 @@ pub fn run() -> Result<()> {
         Commands::Haxelib { names } => {
             commands::haxelib_command::install_haxelibs(&names, load_deps()?, path)?
         }
-        Commands::Git { name, url, git_ref } => commands::git_command::install_git(
+        Commands::Git {
+            name,
+            url,
+            git_ref,
+            dir,
+        } => commands::git_command::install_git(
             &name,
             &url,
             &git_ref,
+            &dir,
             load_deps()?,
             path,
             &remote_separator,
