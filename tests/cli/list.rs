@@ -71,5 +71,6 @@ fn list_fails_without_hmm_json() {
         .current_dir(temp.path())
         .arg("list")
         .assert()
-        .failure();
+        .failure()
+        .stderr(predicate::str::contains("not found"));
 }

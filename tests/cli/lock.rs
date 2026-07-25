@@ -104,6 +104,130 @@ fn lock_selective_locks_only_named_libs() {
     assert!(!updated_json.contains("4.0.0"));
 }
 
+// --- git deps (hermetic: local repos over file://) ---
+
+/// Project with a git dep installed from a local repo, ref "main".
+/// Returns (host_repo_tempdir, project_tempdir, full_head_sha).
+fn installed_git_project() -> (assert_fs::TempDir, assert_fs::TempDir, String) {
+    let (repo_temp, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let head_sha = common::git_rev_parse(&repo_path, "HEAD");
+
+    let json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "gitlib", "type": "git", "ref": "main", "url": "{}"}}
+        ]
+    }}"#,
+        common::file_url(&repo_path)
+    );
+    let temp = common::project_with_hmm_json(&json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success();
+
+    (repo_temp, temp, head_sha)
+}
+
+/// Reads the `ref` value of the single dependency in the project's hmm.json.
+fn read_locked_ref(temp: &assert_fs::TempDir) -> String {
+    let deps = hmm_rs::hmm::json::read_json(&temp.path().join("hmm.json")).unwrap();
+    deps.dependencies[0].vcs_ref.clone().unwrap()
+}
+
+#[test]
+fn lock_git_writes_short_commit_sha() {
+    let (_repo, temp, head_sha) = installed_git_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("lock")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("locked to"));
+
+    let locked = read_locked_ref(&temp);
+    assert_ne!(locked, "main");
+    assert!(
+        head_sha.starts_with(&locked) && locked.len() < head_sha.len(),
+        "expected a shortened prefix of {head_sha}, got {locked}"
+    );
+}
+
+#[test]
+fn lock_git_long_id_writes_full_sha() {
+    let (_repo, temp, head_sha) = installed_git_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["lock", "--long-id"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("locked to"));
+
+    assert_eq!(read_locked_ref(&temp), head_sha);
+}
+
+#[test]
+fn lock_git_not_installed_errors() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "gitlib", "type": "git", "ref": "main", "url": "https://example.com/repo.git"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("lock")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("Git repository not cloned"))
+        .stderr(predicate::str::contains("Failed to lock"));
+}
+
+#[test]
+fn lock_check_detects_unlocked_git_ref() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "gitlib", "type": "git", "url": "https://example.com/repo.git"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["lock", "check"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("no ref specified"));
+}
+
+#[test]
+fn lock_skips_dev_dependency() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "devlib", "type": "dev", "path": "some/path"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("lock")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dev dependencies are already locked by path"));
+}
+
 #[test]
 fn lock_unknown_lib_warns_and_proceeds() {
     let json = r#"{

@@ -114,6 +114,121 @@ fn check_filtered_only_processes_named_libs() {
         .stdout(predicate::str::contains("Checking lib-c").not());
 }
 
+// --- git-branch statuses (hermetic: local repos over file://) ---
+
+/// Builds a project with a git dep cloned from a local two-commit repo.
+/// Returns (host_repo_tempdir, project_tempdir, first_commit_sha).
+fn installed_git_project() -> (assert_fs::TempDir, assert_fs::TempDir, String) {
+    let (repo_temp, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let first_sha = common::git_rev_parse(&repo_path, "HEAD");
+    std::fs::write(repo_path.join("second.txt"), "second\n").unwrap();
+    common::run_git(&repo_path, &["add", "-A"]);
+    common::run_git(&repo_path, &["commit", "-qm", "second"]);
+
+    let json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "gitlib", "type": "git", "ref": "main", "url": "{}"}}
+        ]
+    }}"#,
+        common::file_url(&repo_path)
+    );
+    let temp = common::project_with_hmm_json(&json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success();
+
+    (repo_temp, temp, first_sha)
+}
+
+#[test]
+fn check_git_correct_commit_passes() {
+    let (_repo, temp, _first_sha) = installed_git_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "dependencie(s) are installed at the correct versions",
+        ))
+        .stdout(predicate::str::contains("has issues").not())
+        .stdout(predicate::str::contains("is not at the correct version").not());
+}
+
+#[test]
+fn check_git_detects_wrong_commit() {
+    let (_repo, temp, first_sha) = installed_git_project();
+    let clone = temp.path().join(".haxelib/gitlib/git");
+    common::run_git(&clone, &["checkout", "-q", &first_sha]);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("is not at the correct version"))
+        .stdout(predicate::str::contains("(wrong commit)"));
+}
+
+#[test]
+fn check_git_detects_local_changes_conflict() {
+    let (_repo, temp, _first_sha) = installed_git_project();
+    std::fs::write(temp.path().join(".haxelib/gitlib/git/README.md"), "dirty\n").unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("has issues"))
+        .stdout(predicate::str::contains("(local changes)"));
+}
+
+#[test]
+fn check_git_detects_wrong_commit_plus_local_changes_conflict() {
+    let (_repo, temp, first_sha) = installed_git_project();
+    let clone = temp.path().join(".haxelib/gitlib/git");
+    common::run_git(&clone, &["checkout", "-q", &first_sha]);
+    std::fs::write(clone.join("README.md"), "dirty\n").unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("has issues"))
+        .stdout(predicate::str::contains("(wrong commit + local changes)"));
+}
+
+#[test]
+fn check_git_detects_missing_clone() {
+    // Lib dir with a `.current` saying "git" but no git/ checkout underneath.
+    let json = r#"{
+        "dependencies": [
+            {"name": "gitlib", "type": "git", "ref": "main", "url": "https://example.com/repo.git"}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("gitlib", "git")]);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("is not cloned / installed (via git)"));
+}
+
 #[test]
 fn check_unknown_lib_warns() {
     let json = r#"{

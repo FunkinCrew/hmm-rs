@@ -50,6 +50,52 @@ fn git_install_without_subdir_creates_no_dev_file() {
 }
 
 #[test]
+fn git_without_ref_detects_default_branch() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let url = common::file_url(&repo_path);
+    let temp = common::initialized_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["git", "mylib", &url])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Detected ref: main"));
+
+    let deps = hmm_rs::hmm::json::read_json(&temp.path().join("hmm.json")).unwrap();
+    assert_eq!(deps.dependencies[0].vcs_ref.as_deref(), Some("main"));
+}
+
+#[test]
+fn git_existing_entry_warns_and_replaces() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let url = common::file_url(&repo_path);
+    let json = r#"{
+        "dependencies": [
+            {"name": "mylib", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+    temp.child(".haxelib").create_dir_all().unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["git", "mylib", &url, "main"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("already exists in hmm.json"));
+
+    let deps = hmm_rs::hmm::json::read_json(&temp.path().join("hmm.json")).unwrap();
+    assert_eq!(deps.dependencies.len(), 1, "entry should be replaced, not duplicated");
+    assert_eq!(
+        deps.dependencies[0].haxelib_type,
+        hmm_rs::hmm::haxelib::HaxelibType::Git
+    );
+}
+
+#[test]
 fn install_from_hmm_json_with_subdir_creates_dev_file() {
     let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
     let url = common::file_url(&repo_path);

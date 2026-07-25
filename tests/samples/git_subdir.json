@@ -1,0 +1,11 @@
+{
+  "dependencies": [
+    {
+      "name": "funkin.vis",
+      "type": "git",
+      "dir": "src",
+      "ref": "main",
+      "url": "https://github.com/FunkinCrew/funkVis"
+    }
+  ]
+}

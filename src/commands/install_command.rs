@@ -1031,6 +1031,13 @@ mod tests {
         assert!(result.is_err());
     }
 
+    proptest::proptest! {
+        #[test]
+        fn parse_remote_name_never_panics(url in ".{0,60}", sep in "[-._]") {
+            let _ = parse_remote_name_from_url(&url, &sep);
+        }
+    }
+
     #[test]
     fn test_parse_remote_with_dash_separator() {
         let result = parse_remote_name_from_url("https://github.com/haxeflixel/flixel.git", "-");

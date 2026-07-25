@@ -7,16 +7,36 @@ pub struct Haxelib {
     pub name: String,
     #[serde(rename = "type")]
     pub haxelib_type: HaxelibType,
+    #[serde(default, deserialize_with = "de_blank_as_none")]
     pub dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "ref")]
+    #[serde(default, deserialize_with = "de_blank_as_none")]
     pub vcs_ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "de_blank_as_none")]
     pub version: Option<String>,
+}
+
+/// Normalizes empty or whitespace-only strings to `None` when reading hmm.json,
+/// matching original hmm's `parseOptionalStringProperty` behavior for
+/// `version`/`ref`/`dir`.
+fn de_blank_as_none<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = Option::<String>::deserialize(deserializer)?;
+    std::result::Result::Ok(v.filter(|s| !s.trim().is_empty()))
+}
+
+/// Base URL of the haxelib registry. Overridable via `HMM_HAXELIB_URL` (used by
+/// tests to point at a local stub server).
+pub fn registry_base_url() -> String {
+    std::env::var("HMM_HAXELIB_URL").unwrap_or_else(|_| "https://lib.haxe.org".to_string())
 }
 
 impl Haxelib {
@@ -64,8 +84,10 @@ impl Haxelib {
                     )
                 })?;
                 Ok(format!(
-                    "https://lib.haxe.org/p/{}/{}/download",
-                    self.name, version
+                    "{}/p/{}/{}/download",
+                    registry_base_url(),
+                    self.name,
+                    version
                 ))
             }
             HaxelibType::Git => {

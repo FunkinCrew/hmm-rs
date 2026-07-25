@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    {
+      "name": "mylocal",
+      "type": "dev",
+      "path": "../mylocal"
+    }
+  ]
+}

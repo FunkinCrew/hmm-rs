@@ -3,6 +3,7 @@ mod check;
 mod clean;
 mod dev;
 mod git;
+mod haxelib;
 mod init;
 mod install;
 mod list;

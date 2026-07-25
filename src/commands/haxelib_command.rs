@@ -72,7 +72,8 @@ fn build_haxelib_install(name: &str, version: Option<&str>) -> Result<Haxelib> {
             let client = Client::new();
 
             let url = format!(
-                "https://lib.haxe.org/api/3.0/index.n/?__x={}",
+                "{}/api/3.0/index.n/?__x={}",
+                crate::hmm::haxelib::registry_base_url(),
                 urlencoding::encode(&serialized)
             );
             let resp = client.get(&url).header("X-Haxe-Remoting", "1").send()?;
