@@ -13,6 +13,29 @@ or directly from git:
 
 `cargo install --git https://github.com/ninjamuffin99/hmm-rs hmm-rs`
 
+# Development
+
+```sh
+cargo build              # debug build
+cargo test               # unit, CLI integration and property tests
+```
+
+## Fuzzing
+
+Parsers that handle untrusted input (hmm.json, registry replies, zip archives,
+git URLs) have coverage-guided fuzz targets in `fuzz/`:
+
+```sh
+cargo install cargo-fuzz          # one-time
+cargo +nightly fuzz list          # show targets
+fuzz/run.sh                       # all targets, 60s each
+fuzz/run.sh 900 zip_entry_path    # one target, 900s
+```
+
+Crashes land in `fuzz/artifacts/<target>/` and can be replayed by passing the
+artifact path to `cargo +nightly fuzz run`. CI runs a 60s smoke pass on every PR
+and a longer nightly sweep.
+
 ## TODO List
 
 The below is a broad todo list / notes for myself.

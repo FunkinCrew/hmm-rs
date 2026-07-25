@@ -1,0 +1,31 @@
+{
+  "dependencies": [
+    {
+      "name": "flixel",
+      "type": "git",
+      "dir": null,
+      "ref": "master",
+      "url": "https://github.com/haxeflixel/flixel"
+    },
+    {
+      "name": "flixel-addons",
+      "type": "haxelib",
+      "dir": null,
+      "version": "3.3.0"
+    },
+    {
+      "name": "funkin.vis",
+      "type": "git",
+      "dir": null,
+      "ref": "main",
+      "url": "https://github.com/FunkinCrew/funkVis"
+    },
+    {
+      "name": "hxcpp",
+      "type": "git",
+      "dir": null,
+      "ref": "v4.3.68",
+      "url": "https://github.com/HaxeFoundation/hxcpp"
+    }
+  ]
+}

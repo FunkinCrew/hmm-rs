@@ -1,3 +1,7 @@
 /target
 .haxelib/
 .obsidian
+# cargo-fuzz build output and the evolving corpus; `fuzz/seeds/` is tracked.
+fuzz/target
+fuzz/corpus
+fuzz/artifacts

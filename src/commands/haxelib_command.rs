@@ -34,6 +34,36 @@ pub fn parse_spec(spec: &str) -> Result<(&str, Option<&str>)> {
     }
 }
 
+/// Truncates to at most `max` *characters*, never splitting a UTF-8 sequence.
+fn truncate_chars(s: &str, max: usize) -> &str {
+    match s.char_indices().nth(max) {
+        Some((i, _)) => &s[..i],
+        None => s,
+    }
+}
+
+/// Decodes a Haxe remoting `getLatestVersion` response into the version string.
+///
+/// The wire format is `<tag>:<url-encoded payload>`; anything without a `:` is
+/// an error page or a truncated reply.
+pub fn parse_remoting_response(resp: &str, name: &str) -> Result<String> {
+    let resp_splits = resp.split(':').collect::<Vec<&str>>();
+    let encoded = resp_splits.get(1).ok_or_else(|| {
+        anyhow!(
+            "Unexpected response from lib.haxe.org for '{}': {}",
+            name,
+            truncate_chars(resp, 200)
+        )
+    })?;
+    let decoded_resp = urlencoding::decode(encoded)?;
+
+    if decoded_resp.starts_with("No such Project") {
+        return Err(anyhow!("{}", decoded_resp));
+    }
+
+    Ok(decoded_resp.to_string())
+}
+
 pub fn install_haxelibs(
     specs: &[String],
     mut deps: Dependancies,
@@ -41,6 +71,7 @@ pub fn install_haxelibs(
 ) -> Result<()> {
     for spec in specs {
         let (name, version) = parse_spec(spec)?;
+        hmm::haxelib::validate_lib_name(name)?;
         let haxelib_install = build_haxelib_install(name, version)?;
         commands::install_command::install_from_haxelib(&haxelib_install)?;
         deps.dependencies.push(haxelib_install);
@@ -79,23 +110,11 @@ fn build_haxelib_install(name: &str, version: Option<&str>) -> Result<Haxelib> {
             let resp = client.get(&url).header("X-Haxe-Remoting", "1").send()?;
 
             let resp = resp.text()?;
-            let resp_splits = resp.split(':').collect::<Vec<&str>>();
-            let encoded = resp_splits.get(1).ok_or_else(|| {
-                anyhow!(
-                    "Unexpected response from lib.haxe.org for '{}': {}",
-                    name,
-                    &resp[..resp.len().min(200)]
-                )
-            })?;
-            let decoded_resp = urlencoding::decode(encoded)?;
+            let decoded_resp = parse_remoting_response(&resp, name)?;
 
             println!("Latest version of {} is {}", name, decoded_resp);
 
-            if decoded_resp.starts_with("No such Project") {
-                return Err(anyhow!("{}", decoded_resp));
-            }
-
-            haxelib_install.version = Some(decoded_resp.to_string());
+            haxelib_install.version = Some(decoded_resp);
         }
     };
     Ok(haxelib_install)
@@ -139,5 +158,47 @@ mod tests {
     #[test]
     fn parse_spec_missing_version_errors() {
         assert!(parse_spec("lime@").is_err());
+    }
+
+    // --- parse_remoting_response ---
+
+    #[test]
+    fn parse_remoting_response_decodes_version() {
+        assert_eq!(parse_remoting_response("hxs5:5.0.0", "lime").unwrap(), "5.0.0");
+    }
+
+    #[test]
+    fn parse_remoting_response_url_decodes() {
+        assert_eq!(
+            parse_remoting_response("hxs:1.0.0%2Bbuild", "lime").unwrap(),
+            "1.0.0+build"
+        );
+    }
+
+    #[test]
+    fn parse_remoting_response_no_such_project_errors() {
+        assert!(parse_remoting_response("hxs:No such Project : nope", "nope").is_err());
+    }
+
+    #[test]
+    fn parse_remoting_response_without_colon_errors() {
+        assert!(parse_remoting_response("<html>error</html>", "lime").is_err());
+    }
+
+    /// Regression: the error path used to slice at *byte* 200, which panics
+    /// when byte 200 lands inside a multi-byte character.
+    #[test]
+    fn parse_remoting_response_long_non_ascii_does_not_panic() {
+        // `€` is 3 bytes, so byte 200 lands mid-character.
+        let resp = "€".repeat(300);
+        assert!(!resp.is_char_boundary(200), "test input must straddle byte 200");
+        assert!(parse_remoting_response(&resp, "lime").is_err());
+    }
+
+    #[test]
+    fn truncate_chars_respects_char_boundaries() {
+        assert_eq!(truncate_chars("ébc", 2), "éb");
+        assert_eq!(truncate_chars("abc", 10), "abc");
+        assert_eq!(truncate_chars("", 5), "");
     }
 }

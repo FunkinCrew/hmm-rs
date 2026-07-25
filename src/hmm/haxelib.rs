@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Haxelib {
     pub name: String,
     #[serde(rename = "type")]
@@ -142,6 +142,42 @@ impl Haxelib {
 /// Returns the library directory path given a library name
 pub fn lib_dir_path_for_name(name: &str) -> PathBuf {
     PathBuf::from(".haxelib").join(name.replace(".", ","))
+}
+
+/// Rejects library names that would escape `.haxelib/` or corrupt generated
+/// output. Real haxelib names are alphanumeric plus `.`, `-` and `_`; this only
+/// enforces the safety-critical subset, so that `lib_dir_path_for_name` always
+/// resolves to a single directory inside `.haxelib/`.
+///
+/// Note the dot-to-comma encoding already neutralizes `..` (it becomes `,,`),
+/// so the holes this closes are path separators, absolute paths and control
+/// characters.
+pub fn validate_lib_name(name: &str) -> Result<()> {
+    if name.trim().is_empty() {
+        return Err(anyhow!("invalid library name: empty"));
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err(anyhow!(
+            "invalid library name '{}': path separators are not allowed",
+            name
+        ));
+    }
+    if name.contains(char::is_control) {
+        return Err(anyhow!(
+            "invalid library name '{}': control characters are not allowed",
+            name.escape_debug()
+        ));
+    }
+
+    let encoded = name.replace(".", ",");
+    let mut components = Path::new(&encoded).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) => Ok(()),
+        _ => Err(anyhow!(
+            "invalid library name '{}': must be a single path component",
+            name
+        )),
+    }
 }
 
 /// Returns the git repo path given a library name
@@ -343,5 +379,40 @@ mod tests {
     fn test_url_errors_when_none() {
         let h = make_haxelib("x", HaxelibType::Git, None, None, None);
         assert!(h.url().is_err());
+    }
+
+    // --- validate_lib_name ---
+
+    #[test]
+    fn test_validate_lib_name_accepts_real_names() {
+        for name in ["flixel", "flixel-addons", "funkin.vis", "hxcpp", "a_b"] {
+            assert!(validate_lib_name(name).is_ok(), "{name} should be valid");
+        }
+    }
+
+    #[test]
+    fn test_validate_lib_name_rejects_escaping_names() {
+        // `/tmp/x` is the regression case: without validation,
+        // `.haxelib`.join("/tmp/x") discards the base and yields `/tmp/x`.
+        for name in ["/tmp/x", "a/b", "a\\b", "", "   ", "\u{0}", "a\nb"] {
+            assert!(
+                validate_lib_name(name).is_err(),
+                "{name:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validated_names_stay_under_haxelib() {
+        for name in ["flixel", "funkin.vis", "..", ".", "-x"] {
+            if validate_lib_name(name).is_ok() {
+                let path = lib_dir_path_for_name(name);
+                assert!(
+                    path.starts_with(".haxelib"),
+                    "{name:?} escaped to {path:?}"
+                );
+                assert_eq!(path.components().count(), 2, "{name:?} -> {path:?}");
+            }
+        }
     }
 }

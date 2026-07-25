@@ -11,7 +11,7 @@ use reqwest::Client as ReqwestClient;
 use std::env;
 use std::fs::File;
 use std::io::{self, stdin, stdout, Write};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use owo_colors::OwoColorize;
 use zip::ZipArchive;
 
@@ -209,23 +209,11 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
     // Extract entries, stripping the base_path prefix
     for i in 0..zip_file.len() {
         let mut entry = zip_file.by_index(i)?;
-        let full_name = entry.name().replace('\\', "/");
 
-        if !full_name.starts_with(&base_path) {
+        let Some(out_path) = sanitize_zip_entry(&base_path, entry.name(), &unzipped_output_dir)
+        else {
             continue;
-        }
-
-        let relative = &full_name[base_path.len()..];
-        if relative.is_empty() {
-            continue;
-        }
-
-        // Reject path traversal
-        if relative.contains("..") {
-            continue;
-        }
-
-        let out_path = unzipped_output_dir.join(relative);
+        };
 
         if entry.is_dir() {
             std::fs::create_dir_all(&out_path)?;
@@ -438,8 +426,39 @@ fn print_success(haxelib: &Haxelib) -> Result<()> {
     Ok(())
 }
 
+/// Maps a zip entry name to the path it should be extracted to under `dest`,
+/// or `None` if the entry must be skipped.
+///
+/// Entries are skipped when they fall outside `base_path`, are empty once the
+/// prefix is stripped, or would escape `dest` (absolute paths, drive prefixes,
+/// and `..` components). Only `Normal` path components are ever joined onto
+/// `dest`, so the returned path is always strictly inside it.
+pub fn sanitize_zip_entry(base_path: &str, entry_name: &str, dest: &Path) -> Option<PathBuf> {
+    let full_name = entry_name.replace('\\', "/");
+    let relative = full_name.strip_prefix(base_path)?;
+    if relative.is_empty() {
+        return None;
+    }
+
+    let mut out_path = dest.to_path_buf();
+    let mut pushed = false;
+    for component in Path::new(relative).components() {
+        match component {
+            Component::Normal(part) => {
+                out_path.push(part);
+                pushed = true;
+            }
+            // A `.` is harmless and simply skipped; anything else could escape.
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    pushed.then_some(out_path)
+}
+
 /// Parse a remote name from a git URL (format: username<sep>repo).
-fn parse_remote_name_from_url(url: &str, separator: &str) -> Result<String> {
+pub fn parse_remote_name_from_url(url: &str, separator: &str) -> Result<String> {
     // Handle various URL formats:
     // https://github.com/user/repo.git
     // https://github.com/user/repo
@@ -994,6 +1013,85 @@ pub fn ensure_git_subdir_dev_link(haxelib: &Haxelib) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- sanitize_zip_entry ---
+
+    fn dest() -> PathBuf {
+        PathBuf::from(".haxelib/flixel/5,0,0")
+    }
+
+    #[test]
+    fn sanitize_zip_entry_strips_base_path() {
+        assert_eq!(
+            sanitize_zip_entry("release/", "release/src/Main.hx", &dest()),
+            Some(dest().join("src").join("Main.hx"))
+        );
+    }
+
+    #[test]
+    fn sanitize_zip_entry_handles_empty_base_path() {
+        assert_eq!(
+            sanitize_zip_entry("", "haxelib.json", &dest()),
+            Some(dest().join("haxelib.json"))
+        );
+    }
+
+    #[test]
+    fn sanitize_zip_entry_normalizes_backslashes() {
+        assert_eq!(
+            sanitize_zip_entry("", "src\\Main.hx", &dest()),
+            Some(dest().join("src").join("Main.hx"))
+        );
+    }
+
+    #[test]
+    fn sanitize_zip_entry_skips_outside_base_and_empty() {
+        assert_eq!(sanitize_zip_entry("release/", "other/x", &dest()), None);
+        assert_eq!(sanitize_zip_entry("release/", "release/", &dest()), None);
+        assert_eq!(sanitize_zip_entry("", "", &dest()), None);
+    }
+
+    /// Regression: the old guard only rejected the substring "..", so an
+    /// absolute entry name slipped through and `join` discarded the base dir.
+    #[test]
+    fn sanitize_zip_entry_rejects_escaping_entries() {
+        for entry in ["/etc/passwd", "../../evil", "a/../../evil", "/", "//x"] {
+            assert_eq!(
+                sanitize_zip_entry("", entry, &dest()),
+                None,
+                "{entry:?} should be rejected"
+            );
+        }
+    }
+
+    /// The invariant that actually matters: whatever comes back is inside
+    /// `dest`. (`C:\evil` is a Windows drive prefix there, but merely an odd
+    /// directory name on unix, so assert containment rather than rejection.)
+    #[test]
+    fn sanitize_zip_entry_output_always_inside_dest() {
+        let dest = dest();
+        for entry in [
+            "/etc/passwd",
+            "../../evil",
+            "C:\\evil",
+            "a/./b",
+            "release/../../x",
+            "ok.hx",
+        ] {
+            if let Some(out) = sanitize_zip_entry("", entry, &dest) {
+                assert!(out.starts_with(&dest), "{entry:?} escaped to {out:?}");
+            }
+        }
+    }
+
+    /// The old substring check also rejected perfectly legal file names.
+    #[test]
+    fn sanitize_zip_entry_allows_dots_inside_names() {
+        assert_eq!(
+            sanitize_zip_entry("", "foo..bar.txt", &dest()),
+            Some(dest().join("foo..bar.txt"))
+        );
+    }
 
     #[test]
     fn test_parse_remote_https_with_git_suffix() {

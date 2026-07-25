@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    {
+      "name": "format",
+      "type": "haxelib",
+      "version": null
+    }
+  ]
+}

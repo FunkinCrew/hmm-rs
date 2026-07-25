@@ -1,0 +1,68 @@
+[package]
+name = "hmm-rs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4"
+serde_json = "1"
+
+[dependencies.hmm-rs]
+path = ".."
+
+# Keep the fuzz crate out of the parent package's build graph.
+[workspace]
+
+[[bin]]
+name = "parse_spec"
+path = "fuzz_targets/parse_spec.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hmm_json"
+path = "fuzz_targets/hmm_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lib_dir_path"
+path = "fuzz_targets/lib_dir_path.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "zip_entry_path"
+path = "fuzz_targets/zip_entry_path.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "remoting_response"
+path = "fuzz_targets/remoting_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "remote_name_from_url"
+path = "fuzz_targets/remote_name_from_url.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "render_hxml"
+path = "fuzz_targets/render_hxml.rs"
+test = false
+doc = false
+bench = false

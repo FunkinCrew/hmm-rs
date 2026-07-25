@@ -1,0 +1,11 @@
+{
+  "dependencies": [
+    {
+      "name": "flixel",
+      "type": "git",
+      "ref": "master",
+      "dir": null,
+      "url": "https://github.com/haxeflixel/flixel"
+    }
+  ]
+}

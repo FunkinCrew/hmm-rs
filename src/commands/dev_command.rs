@@ -33,6 +33,8 @@ pub fn add_dev_dependency(
     mut deps: Dependancies,
     json_path: PathBuf,
 ) -> Result<()> {
+    hmm::haxelib::validate_lib_name(name)?;
+
     // Convert to absolute path
     let absolute_path = Path::new(path).canonicalize()?;
 

@@ -35,5 +35,11 @@ pub fn create_empty_hmm_json() -> Result<()> {
 pub fn read_json(path: &PathBuf) -> Result<Dependancies> {
     let file = File::open(path).context(format!("JSON {:?} not found", path))?;
     let deps: Dependancies = serde_json::from_reader(file)?;
+    // Names from hmm.json feed directly into `.haxelib/` paths (including
+    // `remove_dir_all`), so reject anything that could escape before use.
+    for lib in deps.dependencies.iter() {
+        crate::hmm::haxelib::validate_lib_name(&lib.name)
+            .with_context(|| format!("in {}", path.display()))?;
+    }
     Ok(deps)
 }

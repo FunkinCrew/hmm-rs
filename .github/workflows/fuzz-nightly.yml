@@ -1,0 +1,50 @@
+name: Fuzz (nightly)
+
+# Long-running coverage-guided fuzzing. The 60s smoke run in ci.yml guards
+# every PR; this digs deeper on a schedule.
+on:
+  schedule:
+    # 04:00 UTC daily.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "Seconds to fuzz each target"
+        required: false
+        default: "900"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - parse_spec
+          - hmm_json
+          - lib_dir_path
+          - zip_entry_path
+          - remoting_response
+          - remote_name_from_url
+          - render_hxml
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+          key: fuzz
+      - run: fuzz/run.sh ${{ inputs.duration || 900 }} ${{ matrix.target }}
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

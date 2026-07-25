@@ -1,14 +1,121 @@
-use hmm_rs::commands::haxelib_command::parse_spec;
+//! Property tests for the pure parsing/encoding surfaces.
+//!
+//! These deliberately mirror the `fuzz/fuzz_targets/` invariants. The fuzz
+//! targets go deeper but need nightly and an explicit run; these run on stable
+//! in every `cargo test`, so the invariants are enforced on every PR.
+
+use hmm_rs::commands::haxelib_command::{parse_remoting_response, parse_spec};
+use hmm_rs::commands::install_command::sanitize_zip_entry;
+use hmm_rs::commands::tohxml_command::render_hxml;
 use hmm_rs::hmm::dependencies::Dependancies;
-use hmm_rs::hmm::haxelib::{lib_dir_path_for_name, Haxelib, HaxelibType};
+use hmm_rs::hmm::haxelib::{lib_dir_path_for_name, validate_lib_name, Haxelib, HaxelibType};
 use hmm_rs::hmm::json;
 use proptest::prelude::*;
+use std::path::{Component, Path};
+
+/// Names built from the characters that actually break things: separators,
+/// commas (which collide with the dot encoding), dots, and leading slashes.
+fn adversarial_name() -> impl Strategy<Value = String> {
+    prop_oneof![
+        "[a-zA-Z0-9_.-]{1,24}",
+        "[a-zA-Z0-9_.,/\\\\-]{0,24}",
+        r"[./\\]{0,6}[a-z]{0,8}[./\\]{0,6}",
+        "\\PC{0,24}",
+    ]
+}
+
+/// hmm.json documents carrying the null/blank/whitespace optional-field shapes
+/// that `de_blank_as_none` is responsible for normalizing.
+fn hmm_json_document() -> impl Strategy<Value = String> {
+    let optional = prop_oneof![
+        Just("null".to_string()),
+        Just("\"\"".to_string()),
+        Just("\"   \"".to_string()),
+        Just("\"\\t\\n\"".to_string()),
+        Just("\"1.2.3\"".to_string()),
+    ];
+    let type_name = prop_oneof![
+        Just("haxelib".to_string()),
+        Just("git".to_string()),
+        Just("dev".to_string()),
+    ];
+
+    proptest::collection::vec(
+        (
+            "[a-z][a-z0-9.]{0,8}",
+            type_name,
+            optional.clone(),
+            optional.clone(),
+            optional,
+        ),
+        0..5,
+    )
+    .prop_map(|entries| {
+        let deps: Vec<String> = entries
+            .iter()
+            .map(|(name, ty, version, vcs_ref, dir)| {
+                format!(
+                    r#"{{"name":"{name}","type":"{ty}","version":{version},"ref":{vcs_ref},"dir":{dir}}}"#
+                )
+            })
+            .collect();
+        format!(r#"{{"dependencies":[{}]}}"#, deps.join(","))
+    })
+}
+
+fn haxelib_type() -> impl Strategy<Value = HaxelibType> {
+    prop_oneof![
+        Just(HaxelibType::Haxelib),
+        Just(HaxelibType::Git),
+        Just(HaxelibType::Dev),
+    ]
+}
+
+/// A `Haxelib` whose required fields are always populated, so `render_hxml`
+/// and `save_json` both succeed.
+fn well_formed_haxelib() -> impl Strategy<Value = Haxelib> {
+    (
+        "[a-zA-Z][a-zA-Z0-9_.-]{0,12}",
+        haxelib_type(),
+        "[0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{1,2}",
+        "https://example\\.com/[a-z]{1,8}/[a-z]{1,8}",
+        "[a-z0-9]{1,12}",
+    )
+        .prop_map(|(name, haxelib_type, version, url, vcs_ref)| Haxelib {
+            name,
+            dir: None,
+            path: Some("some/path".to_string()),
+            version: Some(version),
+            url: Some(url),
+            vcs_ref: Some(vcs_ref),
+            haxelib_type,
+        })
+}
 
 proptest! {
     /// parse_spec must never panic, whatever the input.
     #[test]
-    fn parse_spec_never_panics(s in ".{0,60}") {
+    fn parse_spec_never_panics(s in "\\PC{0,60}") {
         let _ = parse_spec(&s);
+    }
+
+    /// A successful parse is losslessly reconstructible from its parts, and
+    /// never yields an empty name or version.
+    #[test]
+    fn parse_spec_result_reconstructs_input(s in "[a-zA-Z0-9_.@-]{0,24}") {
+        match parse_spec(&s) {
+            Ok((name, Some(version))) => {
+                prop_assert!(!name.is_empty());
+                prop_assert!(!version.is_empty());
+                prop_assert_eq!(&s, &format!("{name}@{version}"));
+            }
+            Ok((name, None)) => {
+                prop_assert!(!name.is_empty());
+                prop_assert!(!name.contains('@'));
+                prop_assert_eq!(&s, name);
+            }
+            Err(_) => {}
+        }
     }
 
     /// A well-formed `name@version` spec splits into its two parts.
@@ -32,6 +139,111 @@ proptest! {
         prop_assert!(!encoded.contains('.'));
         prop_assert_eq!(encoded.replace(',', "."), name);
     }
+
+    /// Any name that passes validation maps to exactly `.haxelib/<one dir>`.
+    /// Callers `remove_dir_all` this path, so escaping it is destructive.
+    #[test]
+    fn validated_names_stay_under_haxelib(name in adversarial_name()) {
+        prop_assume!(validate_lib_name(&name).is_ok());
+
+        let path = lib_dir_path_for_name(&name);
+        prop_assert!(path.starts_with(".haxelib"), "{:?} escaped to {:?}", name, path);
+        prop_assert!(
+            path.components().all(|c| matches!(c, Component::Normal(_))),
+            "{:?} produced a non-normal component: {:?}", name, path
+        );
+        prop_assert_eq!(path.components().count(), 2, "{:?} -> {:?}", name, path);
+    }
+
+    /// Validation never accepts a name carrying a separator or control char.
+    #[test]
+    fn validation_rejects_separators_and_controls(name in adversarial_name()) {
+        if name.contains('/') || name.contains('\\') || name.contains(char::is_control) {
+            prop_assert!(validate_lib_name(&name).is_err(), "accepted {:?}", name);
+        }
+    }
+
+    /// Arbitrary bytes must never panic the hmm.json parser.
+    #[test]
+    fn hmm_json_parsing_never_panics(bytes in proptest::collection::vec(any::<u8>(), 0..256)) {
+        let _ = serde_json::from_slice::<Dependancies>(&bytes);
+    }
+
+    /// Anything that parses survives a serialize/re-parse cycle unchanged.
+    /// Guards the blank-string-to-None normalization against emitting output
+    /// it cannot read back.
+    #[test]
+    fn hmm_json_serialization_is_a_fixpoint(text in hmm_json_document()) {
+        let deps = serde_json::from_str::<Dependancies>(&text)
+            .expect("generated documents are well-formed");
+
+        let out = serde_json::to_string(&deps).unwrap();
+        let reparsed = serde_json::from_str::<Dependancies>(&out).unwrap();
+        prop_assert_eq!(deps.dependencies.len(), reparsed.dependencies.len());
+        prop_assert_eq!(&out, &serde_json::to_string(&reparsed).unwrap());
+    }
+
+    /// Blank and whitespace-only optional fields always normalize to `None`,
+    /// matching original hmm's `parseOptionalStringProperty`.
+    #[test]
+    fn blank_optional_fields_normalize_to_none(text in hmm_json_document()) {
+        let deps = serde_json::from_str::<Dependancies>(&text).unwrap();
+        for lib in deps.dependencies.iter() {
+            for field in [&lib.version, &lib.vcs_ref, &lib.dir] {
+                if let Some(value) = field {
+                    prop_assert!(!value.trim().is_empty(), "blank field survived: {:?}", lib);
+                }
+            }
+        }
+    }
+
+    /// A sanitized zip entry is always strictly inside the destination dir.
+    #[test]
+    fn zip_entries_never_escape_destination(
+        base_path in "[a-z/]{0,8}",
+        entry_name in prop_oneof![
+            "[a-zA-Z0-9_./\\\\-]{0,32}",
+            r"[./\\]{0,8}[a-z]{0,8}[./\\]{0,8}[a-z]{0,8}",
+            "\\PC{0,32}",
+        ],
+    ) {
+        let dest = Path::new(".haxelib/lib/1,0,0");
+        let Some(out) = sanitize_zip_entry(&base_path, &entry_name, dest) else { return Ok(()) };
+
+        prop_assert!(out.starts_with(dest), "{:?} escaped to {:?}", entry_name, out);
+        let extra = out.strip_prefix(dest).unwrap();
+        prop_assert!(extra.components().count() > 0);
+        prop_assert!(
+            extra.components().all(|c| matches!(c, Component::Normal(_))),
+            "{:?} produced a traversal component: {:?}", entry_name, out
+        );
+    }
+
+    /// Decoding an untrusted registry reply must never panic. The `€` case
+    /// covers the char-boundary slice that used to blow up on long non-ASCII
+    /// error pages.
+    #[test]
+    fn remoting_response_never_panics(
+        resp in prop_oneof!["\\PC{0,300}", "€{0,300}", "[a-z:%0-9]{0,64}"],
+        name in "[a-z]{0,12}",
+    ) {
+        let _ = parse_remoting_response(&resp, &name);
+    }
+
+    /// hxml is line-oriented: exactly one `-lib` directive per dependency.
+    #[test]
+    fn render_hxml_emits_one_line_per_dependency(
+        libs in proptest::collection::vec(well_formed_haxelib(), 0..8)
+    ) {
+        let count = libs.len();
+        let deps = Dependancies { dependencies: libs };
+        let hxml = render_hxml(&deps).unwrap();
+
+        prop_assert_eq!(hxml.lines().count(), count);
+        for line in hxml.lines() {
+            prop_assert!(line.starts_with("-lib "), "unexpected hxml line {:?}", line);
+        }
+    }
 }
 
 proptest! {
@@ -39,35 +251,25 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(24))]
 
     /// save_json -> read_json round-trips every entry and always emits them
-    /// sorted case-insensitively by name.
+    /// sorted case-insensitively by name. Covers git and dev entries and
+    /// dotted names, not just plain haxelib deps.
     #[test]
     fn save_json_round_trips_and_sorts(
-        libs in proptest::collection::vec(
-            ("[a-zA-Z][a-zA-Z0-9_-]{0,10}", "[0-9]\\.[0-9]\\.[0-9]"),
-            1..8,
-        )
+        libs in proptest::collection::vec(well_formed_haxelib(), 1..8)
     ) {
         let tmp = tempfile::tempdir().unwrap();
         let json_path = tmp.path().join("hmm.json");
 
-        let deps = Dependancies {
-            dependencies: libs
-                .iter()
-                .map(|(name, version)| Haxelib {
-                    name: name.clone(),
-                    haxelib_type: HaxelibType::Haxelib,
-                    dir: None,
-                    vcs_ref: None,
-                    path: None,
-                    url: None,
-                    version: Some(version.clone()),
-                })
-                .collect(),
-        };
-        json::save_json(deps, json_path.clone()).unwrap();
+        let expected_len = libs.len();
+        let mut expected: Vec<(String, Option<String>)> = libs
+            .iter()
+            .map(|l| (l.name.clone(), l.version.clone()))
+            .collect();
+
+        json::save_json(Dependancies { dependencies: libs }, json_path.clone()).unwrap();
 
         let read_back = json::read_json(&json_path).unwrap();
-        prop_assert_eq!(read_back.dependencies.len(), libs.len());
+        prop_assert_eq!(read_back.dependencies.len(), expected_len);
 
         let names: Vec<String> = read_back
             .dependencies
@@ -78,11 +280,10 @@ proptest! {
         sorted.sort_by_key(|n| n.to_lowercase());
         prop_assert_eq!(&names, &sorted, "entries must be sorted case-insensitively");
 
-        let mut expected: Vec<(String, String)> = libs.clone();
-        let mut actual: Vec<(String, String)> = read_back
+        let mut actual: Vec<(String, Option<String>)> = read_back
             .dependencies
             .iter()
-            .map(|d| (d.name.clone(), d.version.clone().unwrap()))
+            .map(|d| (d.name.clone(), d.version.clone()))
             .collect();
         expected.sort();
         actual.sort();

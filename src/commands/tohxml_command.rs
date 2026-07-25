@@ -4,7 +4,8 @@ use crate::hmm::dependencies::Dependancies;
 use crate::hmm::haxelib::HaxelibType;
 use anyhow::Result;
 
-pub fn dump_to_hxml(deps: &Dependancies, hxml_out: Option<PathBuf>) -> Result<()> {
+/// Renders the dependency list as hxml: one `-lib` line per dependency.
+pub fn render_hxml(deps: &Dependancies) -> Result<String> {
     let mut hxml = String::new();
     for haxelib in deps.dependencies.iter() {
         let mut lib_string = String::from("-lib ");
@@ -23,6 +24,12 @@ pub fn dump_to_hxml(deps: &Dependancies, hxml_out: Option<PathBuf>) -> Result<()
         hxml.push_str(&lib_string);
         hxml.push('\n');
     }
+
+    Ok(hxml)
+}
+
+pub fn dump_to_hxml(deps: &Dependancies, hxml_out: Option<PathBuf>) -> Result<()> {
+    let hxml = render_hxml(deps)?;
 
     if let Some(hxml_out) = hxml_out {
         std::fs::write(hxml_out, hxml)?;

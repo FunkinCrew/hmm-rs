@@ -19,3 +19,27 @@ jobs:
       # --include-ignored also runs the network-dependent tests (marked
       # #[ignore]) that are skipped in local offline runs.
       - run: cargo test -- --include-ignored
+
+  fuzz-smoke:
+    name: Fuzz (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # cargo-fuzz needs nightly for -Z sanitizer / libFuzzer support.
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+          key: fuzz
+      # 60s per target: enough to catch a regression that reaches the seeds,
+      # short enough to keep PR CI fast. The long runs live in fuzz-nightly.yml.
+      - run: fuzz/run.sh 60
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: fuzz-artifacts-smoke
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

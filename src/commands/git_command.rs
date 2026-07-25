@@ -34,6 +34,8 @@ pub fn install_git(
     json_path: PathBuf,
     separator: &str,
 ) -> Result<()> {
+    hmm::haxelib::validate_lib_name(name)?;
+
     // Check if library already exists in dependencies
     if let Some(existing) = deps.dependencies.iter().find(|lib| lib.name == name) {
         println!(
