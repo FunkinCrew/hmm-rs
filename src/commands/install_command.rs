@@ -324,7 +324,7 @@ fn smart_checkout_git_ref(haxelib: &Haxelib, repo_path: &Path, separator: &str) 
 
     // Try to checkout locally first
     let checkout_result = std::process::Command::new("git")
-        .args(["-C", path_to_str(&repo_path)?, "checkout", target_ref])
+        .args(["-C", path_to_str(repo_path)?, "checkout", target_ref])
         .output()
         .context("Failed to execute git checkout")?;
 
@@ -340,7 +340,7 @@ fn smart_checkout_git_ref(haxelib: &Haxelib, repo_path: &Path, separator: &str) 
     );
 
     let fetch_result = std::process::Command::new("git")
-        .args(["-C", path_to_str(&repo_path)?, "fetch", &remote_name])
+        .args(["-C", path_to_str(repo_path)?, "fetch", &remote_name])
         .status()
         .context("Failed to execute git fetch")?;
 
@@ -353,7 +353,7 @@ fn smart_checkout_git_ref(haxelib: &Haxelib, repo_path: &Path, separator: &str) 
         let refetch_result = std::process::Command::new("git")
             .args([
                 "-C",
-                path_to_str(&repo_path)?,
+                path_to_str(repo_path)?,
                 "fetch",
                 "--refetch",
                 &remote_name,
@@ -372,7 +372,7 @@ fn smart_checkout_git_ref(haxelib: &Haxelib, repo_path: &Path, separator: &str) 
 
     // Try checkout again after fetch
     let checkout_retry = std::process::Command::new("git")
-        .args(["-C", path_to_str(&repo_path)?, "checkout", target_ref])
+        .args(["-C", path_to_str(repo_path)?, "checkout", target_ref])
         .status()
         .context("Failed to execute git checkout after fetch")?;
 
@@ -393,7 +393,7 @@ fn update_git_submodules(repo_path: &Path) -> Result<()> {
     let result = std::process::Command::new("git")
         .args([
             "-C",
-            path_to_str(&repo_path)?,
+            path_to_str(repo_path)?,
             "submodule",
             "update",
             "--init",
@@ -576,7 +576,7 @@ fn ensure_git_remote(repo_path: &Path, remote_name: &str, url: &str) -> Result<(
     let check_remote = std::process::Command::new("git")
         .args([
             "-C",
-            path_to_str(&repo_path)?,
+            path_to_str(repo_path)?,
             "remote",
             "get-url",
             remote_name,
@@ -596,7 +596,7 @@ fn ensure_git_remote(repo_path: &Path, remote_name: &str, url: &str) -> Result<(
             let update_result = std::process::Command::new("git")
                 .args([
                     "-C",
-                    path_to_str(&repo_path)?,
+                    path_to_str(repo_path)?,
                     "remote",
                     "set-url",
                     remote_name,
@@ -616,7 +616,7 @@ fn ensure_git_remote(repo_path: &Path, remote_name: &str, url: &str) -> Result<(
         let add_result = std::process::Command::new("git")
             .args([
                 "-C",
-                path_to_str(&repo_path)?,
+                path_to_str(repo_path)?,
                 "remote",
                 "add",
                 remote_name,
@@ -643,7 +643,7 @@ fn rename_origin_remote(repo_path: &Path, new_name: &str) -> Result<()> {
     let check_origin = std::process::Command::new("git")
         .args([
             "-C",
-            path_to_str(&repo_path)?,
+            path_to_str(repo_path)?,
             "remote",
             "get-url",
             "origin",
@@ -657,7 +657,7 @@ fn rename_origin_remote(repo_path: &Path, new_name: &str) -> Result<()> {
         let rename_result = std::process::Command::new("git")
             .args([
                 "-C",
-                path_to_str(&repo_path)?,
+                path_to_str(repo_path)?,
                 "remote",
                 "rename",
                 "origin",
@@ -718,7 +718,7 @@ fn git_stash_push(repo_path: &Path, haxelib: &Haxelib) -> Result<()> {
     let result = std::process::Command::new("git")
         .args([
             "-C",
-            path_to_str(&repo_path)?,
+            path_to_str(repo_path)?,
             "stash",
             "push",
             "-m",
@@ -741,7 +741,7 @@ fn git_stash_pop(repo_path: &Path, haxelib: &Haxelib) -> Result<()> {
     println!("Restoring stashed changes in {}...", haxelib.name);
 
     let result = std::process::Command::new("git")
-        .args(["-C", path_to_str(&repo_path)?, "stash", "pop"])
+        .args(["-C", path_to_str(repo_path)?, "stash", "pop"])
         .output()
         .context("Failed to execute git stash pop")?;
 
@@ -784,7 +784,7 @@ fn git_discard_changes(repo_path: &Path, haxelib: &Haxelib) -> Result<()> {
 
     // Reset tracked files
     let reset_result = std::process::Command::new("git")
-        .args(["-C", path_to_str(&repo_path)?, "reset", "--hard", "HEAD"])
+        .args(["-C", path_to_str(repo_path)?, "reset", "--hard", "HEAD"])
         .status()
         .context("Failed to execute git reset")?;
 
@@ -794,7 +794,7 @@ fn git_discard_changes(repo_path: &Path, haxelib: &Haxelib) -> Result<()> {
 
     // Clean untracked files
     let clean_result = std::process::Command::new("git")
-        .args(["-C", path_to_str(&repo_path)?, "clean", "-fd"])
+        .args(["-C", path_to_str(repo_path)?, "clean", "-fd"])
         .status()
         .context("Failed to execute git clean")?;
 
@@ -827,7 +827,7 @@ fn git_commit_changes(repo_path: &Path, haxelib: &Haxelib) -> Result<()> {
 
     // Stage all changes
     let add_result = std::process::Command::new("git")
-        .args(["-C", path_to_str(&repo_path)?, "add", "-A"])
+        .args(["-C", path_to_str(repo_path)?, "add", "-A"])
         .status()
         .context("Failed to execute git add")?;
 
@@ -837,7 +837,7 @@ fn git_commit_changes(repo_path: &Path, haxelib: &Haxelib) -> Result<()> {
 
     // Commit
     let commit_result = std::process::Command::new("git")
-        .args(["-C", path_to_str(&repo_path)?, "commit", "-m", message])
+        .args(["-C", path_to_str(repo_path)?, "commit", "-m", message])
         .output()
         .context("Failed to execute git commit")?;
 
@@ -860,7 +860,7 @@ fn git_commit_changes(repo_path: &Path, haxelib: &Haxelib) -> Result<()> {
 /// Get a summary of changed files in the git repository
 fn get_git_diff_stat(repo_path: &Path) -> Result<String> {
     let output = std::process::Command::new("git")
-        .args(["-C", path_to_str(&repo_path)?, "diff", "--stat"])
+        .args(["-C", path_to_str(repo_path)?, "diff", "--stat"])
         .output()
         .context("Failed to get git diff stat")?;
 

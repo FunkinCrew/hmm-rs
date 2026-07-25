@@ -13,7 +13,7 @@ pub fn render_hxml(deps: &Dependancies) -> Result<String> {
 
         match haxelib.haxelib_type {
             HaxelibType::Git => {
-                lib_string.push_str(format!(":git:{}", &haxelib.url()?).as_str());
+                lib_string.push_str(format!(":git:{}", haxelib.url()?).as_str());
                 if let Some(r) = &haxelib.vcs_ref {
                     lib_string.push_str(format!("#{}", r).as_str())
                 }
