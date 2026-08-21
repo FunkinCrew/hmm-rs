@@ -33,7 +33,7 @@ pub fn add_dependency(
             )?;
         }
         None => {
-            haxelib_command::install_haxelibs(&add_args.names, deps, path)?;
+            haxelib_command::install_haxelibs(&add_args.names, path)?;
         }
     }
 

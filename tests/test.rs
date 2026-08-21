@@ -174,7 +174,7 @@ fn haxelib_dep(name: &str, version: &str) -> hmm_rs::hmm::haxelib::Haxelib {
 }
 
 #[test]
-fn test_save_json_sorts_case_insensitively() {
+fn test_save_json_preserves_order() {
     let tmp = assert_fs::TempDir::new().unwrap();
     let json_path = tmp.path().join("hmm.json");
 
@@ -189,7 +189,159 @@ fn test_save_json_sorts_case_insensitively() {
 
     let read_back = hmm::json::read_json(&json_path).unwrap();
     let names: Vec<&str> = read_back.dependencies.iter().map(|d| d.name.as_str()).collect();
-    assert_eq!(names, vec!["Alpha", "beta", "zeta"]);
+    assert_eq!(names, vec!["zeta", "Alpha", "beta"]);
+    let text = std::fs::read_to_string(&json_path).unwrap();
+    assert!(text.ends_with("}\n"), "save_json should end with a newline");
+    assert!(!text.contains("\"dir\""), "dir: None must be omitted");
+}
+
+// --- upsert_dependencies / remove_dependencies ---
+//
+// These edit hmm.json in place, so the fixture deliberately has everything a
+// whole-file rewrite would normalize: 4-space indent, unsorted names, an entry
+// with `url` before `ref`, an unknown key, and a trailing newline. Assertions
+// compare exact text.
+
+const SURGICAL_FIXTURE: &str = "{
+    \"dependencies\": [
+        {
+            \"name\": \"zeta\",
+            \"type\": \"haxelib\",
+            \"version\": \"1.0.0\",
+            \"_comment\": \"keep me\"
+        },
+        {
+            \"name\": \"alpha\",
+            \"type\": \"git\",
+            \"url\": \"https://example.com/alpha\",
+            \"ref\": \"main\"
+        }
+    ]
+}
+";
+
+fn write_fixture(content: &str) -> (assert_fs::TempDir, PathBuf) {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let json_path = tmp.path().join("hmm.json");
+    std::fs::write(&json_path, content).unwrap();
+    (tmp, json_path)
+}
+
+fn git_dep(name: &str, url: &str, vcs_ref: &str, dir: Option<&str>) -> hmm_rs::hmm::haxelib::Haxelib {
+    hmm_rs::hmm::haxelib::Haxelib {
+        name: name.to_string(),
+        haxelib_type: HaxelibType::Git,
+        dir: dir.map(str::to_string),
+        vcs_ref: Some(vcs_ref.to_string()),
+        path: None,
+        url: Some(url.to_string()),
+        version: None,
+    }
+}
+
+#[test]
+fn test_upsert_appends_new_entry_and_touches_nothing_else() {
+    let (_tmp, json_path) = write_fixture(SURGICAL_FIXTURE);
+
+    hmm::json::upsert_dependencies(&json_path, &[haxelib_dep("mid", "2.0.0")]).unwrap();
+
+    let expected = SURGICAL_FIXTURE.replace(
+        "        }
+    ]
+}
+",
+        "        },
+        {
+            \"name\": \"mid\",
+            \"type\": \"haxelib\",
+            \"version\": \"2.0.0\"
+        }
+    ]
+}
+",
+    );
+    assert_eq!(std::fs::read_to_string(&json_path).unwrap(), expected);
+}
+
+#[test]
+fn test_upsert_updates_existing_entry_in_place() {
+    // Lock-style change: only `ref` differs. `url` must stay before `ref`, the
+    // entry must keep its position, and the unknown `_comment` key survives.
+    let (_tmp, json_path) = write_fixture(SURGICAL_FIXTURE);
+
+    let lib = git_dep("alpha", "https://example.com/alpha", "abc123", None);
+    hmm::json::upsert_dependencies(&json_path, &[lib]).unwrap();
+
+    let expected = SURGICAL_FIXTURE.replace("\"ref\": \"main\"", "\"ref\": \"abc123\"");
+    assert_ne!(expected, SURGICAL_FIXTURE);
+    assert_eq!(std::fs::read_to_string(&json_path).unwrap(), expected);
+}
+
+#[test]
+fn test_upsert_type_change_drops_stale_keys_and_keeps_position() {
+    let (_tmp, json_path) = write_fixture(SURGICAL_FIXTURE);
+
+    let lib = git_dep("zeta", "https://example.com/zeta", "v2", None);
+    hmm::json::upsert_dependencies(&json_path, &[lib]).unwrap();
+
+    let expected = SURGICAL_FIXTURE.replace(
+        "            \"type\": \"haxelib\",
+            \"version\": \"1.0.0\",
+            \"_comment\": \"keep me\"
+",
+        "            \"type\": \"git\",
+            \"_comment\": \"keep me\",
+            \"ref\": \"v2\",
+            \"url\": \"https://example.com/zeta\"
+",
+    );
+    assert_ne!(expected, SURGICAL_FIXTURE);
+    assert_eq!(std::fs::read_to_string(&json_path).unwrap(), expected);
+}
+
+#[test]
+fn test_upsert_omits_dir_when_none_and_writes_it_when_set() {
+    let (_tmp, json_path) = write_fixture(SURGICAL_FIXTURE);
+
+    let plain = git_dep("plain", "https://example.com/plain", "main", None);
+    let subdir = git_dep("subdir", "https://example.com/subdir", "main", Some("src"));
+    hmm::json::upsert_dependencies(&json_path, &[plain, subdir]).unwrap();
+
+    let text = std::fs::read_to_string(&json_path).unwrap();
+    assert!(!text.contains("\"dir\": null"), "got: {text}");
+    assert_eq!(text.matches("\"dir\": \"src\"").count(), 1, "got: {text}");
+}
+
+#[test]
+fn test_upsert_preserves_missing_trailing_newline() {
+    let no_newline = SURGICAL_FIXTURE.trim_end_matches('\n');
+    let (_tmp, json_path) = write_fixture(no_newline);
+
+    hmm::json::upsert_dependencies(&json_path, &[haxelib_dep("mid", "2.0.0")]).unwrap();
+
+    let text = std::fs::read_to_string(&json_path).unwrap();
+    assert!(text.ends_with('}'), "got trailing: {:?}", &text[text.len() - 4..]);
+    assert!(text.contains("\"name\": \"mid\""));
+}
+
+#[test]
+fn test_remove_dependencies_drops_only_named_entries() {
+    let (_tmp, json_path) = write_fixture(SURGICAL_FIXTURE);
+
+    hmm::json::remove_dependencies(&json_path, &["zeta".to_string()]).unwrap();
+
+    let expected = SURGICAL_FIXTURE.replace(
+        "        {
+            \"name\": \"zeta\",
+            \"type\": \"haxelib\",
+            \"version\": \"1.0.0\",
+            \"_comment\": \"keep me\"
+        },
+",
+        "",
+    );
+    assert_ne!(expected, SURGICAL_FIXTURE);
+    assert_eq!(std::fs::read_to_string(&json_path).unwrap(), expected);
 }
 
 #[test]
@@ -213,13 +365,13 @@ fn test_save_json_read_json_round_trip() {
 
     let read_back = hmm::json::read_json(&json_path).unwrap();
     assert_eq!(read_back.dependencies.len(), 2);
-    let git = &read_back.dependencies[0];
+    let lib = &read_back.dependencies[0];
+    assert_eq!(lib.name, "somelib");
+    assert_eq!(lib.version.as_deref(), Some("1.2.3"));
+    let git = &read_back.dependencies[1];
     assert_eq!(git.name, "gitlib");
     assert_eq!(git.haxelib_type, HaxelibType::Git);
     assert_eq!(git.dir.as_deref(), Some("src"));
     assert_eq!(git.vcs_ref.as_deref(), Some("main"));
     assert_eq!(git.url.as_deref(), Some("https://example.com/repo.git"));
-    let lib = &read_back.dependencies[1];
-    assert_eq!(lib.name, "somelib");
-    assert_eq!(lib.version.as_deref(), Some("1.2.3"));
 }

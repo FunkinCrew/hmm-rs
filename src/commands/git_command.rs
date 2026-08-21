@@ -30,7 +30,7 @@ pub fn install_git(
     url: &str,
     git_ref: &Option<String>,
     dir: &Option<String>,
-    mut deps: Dependancies,
+    deps: Dependancies,
     json_path: PathBuf,
     separator: &str,
 ) -> Result<()> {
@@ -72,12 +72,8 @@ pub fn install_git(
         haxelib_install.vcs_ref = Some(detected_ref);
     }
 
-    // Remove existing entry if present, then add new one
-    deps.dependencies.retain(|lib| lib.name != name);
-    deps.dependencies.push(haxelib_install);
-
-    // Save to hmm.json
-    hmm::json::save_json(deps, json_path)?;
+    // Replace the existing entry in place, or append a new one
+    hmm::json::upsert_dependencies(&json_path, &[haxelib_install])?;
 
     Ok(())
 }

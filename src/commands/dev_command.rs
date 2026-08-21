@@ -6,7 +6,6 @@ use anyhow::Result;
 
 use crate::hmm::{
     self,
-    dependencies::Dependancies,
     haxelib::{lib_dir_path_for_name, Haxelib, HaxelibType},
 };
 
@@ -27,12 +26,7 @@ pub fn write_dev_file(name: &str, absolute_path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn add_dev_dependency(
-    name: &str,
-    path: &str,
-    mut deps: Dependancies,
-    json_path: PathBuf,
-) -> Result<()> {
+pub fn add_dev_dependency(name: &str, path: &str, json_path: PathBuf) -> Result<()> {
     hmm::haxelib::validate_lib_name(name)?;
 
     // Convert to absolute path
@@ -50,10 +44,8 @@ pub fn add_dev_dependency(
 
     write_dev_file(name, &absolute_path)?;
 
-    // Replace any existing entry with the same name rather than appending a duplicate.
-    deps.dependencies.retain(|lib| lib.name != name);
-    deps.dependencies.push(dev_haxelib);
-    hmm::json::save_json(deps, json_path)?;
+    // Replaces any existing entry with the same name in place rather than appending a duplicate.
+    hmm::json::upsert_dependencies(&json_path, &[dev_haxelib])?;
     Ok(())
 }
 

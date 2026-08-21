@@ -189,9 +189,7 @@ pub fn run() -> Result<()> {
             &filter.lib,
             &remote_separator,
         )?,
-        Commands::Haxelib { names } => {
-            commands::haxelib_command::install_haxelibs(&names, load_deps()?, path)?
-        }
+        Commands::Haxelib { names } => commands::haxelib_command::install_haxelibs(&names, path)?,
         Commands::Git {
             name,
             url,
@@ -213,7 +211,6 @@ pub fn run() -> Result<()> {
         Commands::Dev { name, path } => commands::dev_command::add_dev_dependency(
             &name,
             &path,
-            load_deps()?,
             args.global_opts.json.clone().unwrap(),
         )?,
         Commands::Lock {

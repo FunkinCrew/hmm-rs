@@ -7,7 +7,6 @@ use crate::{
     commands,
     hmm::{
         self,
-        dependencies::Dependancies,
         haxelib::{Haxelib, HaxelibType},
     },
 };
@@ -64,19 +63,14 @@ pub fn parse_remoting_response(resp: &str, name: &str) -> Result<String> {
     Ok(decoded_resp.to_string())
 }
 
-pub fn install_haxelibs(
-    specs: &[String],
-    mut deps: Dependancies,
-    json_path: PathBuf,
-) -> Result<()> {
+pub fn install_haxelibs(specs: &[String], json_path: PathBuf) -> Result<()> {
     for spec in specs {
         let (name, version) = parse_spec(spec)?;
         hmm::haxelib::validate_lib_name(name)?;
         let haxelib_install = build_haxelib_install(name, version)?;
         commands::install_command::install_from_haxelib(&haxelib_install)?;
-        deps.dependencies.push(haxelib_install);
+        hmm::json::upsert_dependencies(&json_path, &[haxelib_install])?;
     }
-    hmm::json::save_json(deps, json_path)?;
     Ok(())
 }
 

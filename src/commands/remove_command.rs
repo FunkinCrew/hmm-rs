@@ -10,7 +10,7 @@ use crate::hmm::{
 };
 
 pub fn remove_haxelibs(
-    mut deps: Dependancies,
+    deps: Dependancies,
     names: &[String],
     json_path: PathBuf,
 ) -> Result<()> {
@@ -37,8 +37,7 @@ pub fn remove_haxelibs(
         println!("removed {}", name.green().bold());
     }
 
-    deps.dependencies.retain(|h| !to_remove.contains(&h.name));
-    json::save_json(deps, json_path)?;
+    json::remove_dependencies(&json_path, &to_remove)?;
 
     Ok(())
 }

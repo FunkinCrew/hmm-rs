@@ -96,6 +96,49 @@ fn git_existing_entry_warns_and_replaces() {
 }
 
 #[test]
+fn git_add_appends_entry_without_rewriting_the_rest() {
+    // Regression: adding one git dep used to re-sort every entry, emit
+    // `"dir": null` on all of them and drop the trailing newline. The file must
+    // come back byte-identical apart from the appended entry.
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let url = common::file_url(&repo_path);
+    let original = r#"{
+  "dependencies": [
+    {
+      "name": "zeta",
+      "type": "haxelib",
+      "version": "1.0.0"
+    },
+    {
+      "name": "Alpha",
+      "type": "git",
+      "ref": "abc123",
+      "url": "https://example.com/alpha"
+    }
+  ]
+}
+"#;
+    let temp = common::project_with_hmm_json(original);
+    temp.child(".haxelib").create_dir_all().unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["git", "mylib", &url, "main"])
+        .assert()
+        .success();
+
+    let expected = original.replace(
+        "    }\n  ]\n}\n",
+        &format!(
+            "    }},\n    {{\n      \"name\": \"mylib\",\n      \"type\": \"git\",\n      \"ref\": \"main\",\n      \"url\": \"{url}\"\n    }}\n  ]\n}}\n"
+        ),
+    );
+    let actual = std::fs::read_to_string(temp.child("hmm.json").path()).unwrap();
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn install_from_hmm_json_with_subdir_creates_dev_file() {
     let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
     let url = common::file_url(&repo_path);

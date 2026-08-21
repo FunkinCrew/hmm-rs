@@ -250,18 +250,16 @@ proptest! {
     // Filesystem-touching prop: keep the case count small.
     #![proptest_config(ProptestConfig::with_cases(24))]
 
-    /// save_json -> read_json round-trips every entry and always emits them
-    /// sorted case-insensitively by name. Covers git and dev entries and
-    /// dotted names, not just plain haxelib deps.
+    /// save_json -> read_json round-trips every entry in the order given.
+    /// Covers git and dev entries and dotted names, not just plain haxelib deps.
     #[test]
-    fn save_json_round_trips_and_sorts(
+    fn save_json_round_trips_in_order(
         libs in proptest::collection::vec(well_formed_haxelib(), 1..8)
     ) {
         let tmp = tempfile::tempdir().unwrap();
         let json_path = tmp.path().join("hmm.json");
 
-        let expected_len = libs.len();
-        let mut expected: Vec<(String, Option<String>)> = libs
+        let expected: Vec<(String, Option<String>)> = libs
             .iter()
             .map(|l| (l.name.clone(), l.version.clone()))
             .collect();
@@ -269,24 +267,43 @@ proptest! {
         json::save_json(Dependancies { dependencies: libs }, json_path.clone()).unwrap();
 
         let read_back = json::read_json(&json_path).unwrap();
-        prop_assert_eq!(read_back.dependencies.len(), expected_len);
-
-        let names: Vec<String> = read_back
-            .dependencies
-            .iter()
-            .map(|d| d.name.clone())
-            .collect();
-        let mut sorted = names.clone();
-        sorted.sort_by_key(|n| n.to_lowercase());
-        prop_assert_eq!(&names, &sorted, "entries must be sorted case-insensitively");
-
-        let mut actual: Vec<(String, Option<String>)> = read_back
+        let actual: Vec<(String, Option<String>)> = read_back
             .dependencies
             .iter()
             .map(|d| (d.name.clone(), d.version.clone()))
             .collect();
-        expected.sort();
-        actual.sort();
         prop_assert_eq!(actual, expected);
+    }
+
+    /// Upserting a sequence of libs (with repeated names) one at a time reads
+    /// back as: each name once, in first-occurrence order, with the last
+    /// upserted value winning; and `dir: None` never appears in the file.
+    #[test]
+    fn upsert_dependencies_dedups_by_name_in_first_seen_order(
+        libs in proptest::collection::vec(well_formed_haxelib(), 1..8)
+    ) {
+        let tmp = tempfile::tempdir().unwrap();
+        let json_path = tmp.path().join("hmm.json");
+        json::save_json(Dependancies { dependencies: vec![] }, json_path.clone()).unwrap();
+
+        let mut expected: Vec<(String, Option<String>)> = Vec::new();
+        for lib in &libs {
+            json::upsert_dependencies(&json_path, std::slice::from_ref(lib)).unwrap();
+            match expected.iter_mut().find(|(n, _)| n == &lib.name) {
+                Some(slot) => slot.1 = lib.version.clone(),
+                None => expected.push((lib.name.clone(), lib.version.clone())),
+            }
+        }
+
+        let read_back = json::read_json(&json_path).unwrap();
+        let actual: Vec<(String, Option<String>)> = read_back
+            .dependencies
+            .iter()
+            .map(|d| (d.name.clone(), d.version.clone()))
+            .collect();
+        prop_assert_eq!(actual, expected);
+
+        let text = std::fs::read_to_string(&json_path).unwrap();
+        prop_assert!(!text.contains("\"dir\""), "dir: None must be omitted, got: {}", text);
     }
 }

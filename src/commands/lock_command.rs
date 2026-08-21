@@ -21,6 +21,7 @@ pub fn lock_dependencies(
 
     println!("Locking {} dependencies...", libs_to_lock.len().bold());
 
+    let mut locked: Vec<Haxelib> = Vec::new();
     let mut locked_count = 0;
     let mut skipped_count = 0;
     let mut error_count = 0;
@@ -40,6 +41,7 @@ pub fn lock_dependencies(
                     version.green()
                 );
                 locked_count += 1;
+                locked.push(lib.clone());
             }
             Ok(LockResult::Skipped(reason)) => {
                 println!(
@@ -66,8 +68,8 @@ pub fn lock_dependencies(
         }
     }
 
-    if locked_count > 0 {
-        json::save_json(updated_deps, json_path)?;
+    if !locked.is_empty() {
+        json::upsert_dependencies(&json_path, &locked)?;
     }
 
     println!();

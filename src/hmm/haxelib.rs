@@ -7,6 +7,7 @@ pub struct Haxelib {
     pub name: String,
     #[serde(rename = "type")]
     pub haxelib_type: HaxelibType,
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default, deserialize_with = "de_blank_as_none")]
     pub dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
