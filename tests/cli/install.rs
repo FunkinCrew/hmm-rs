@@ -241,3 +241,68 @@ fn install_selective_already_installed() {
         .stdout(predicate::str::contains("Checking done-b").not())
         .stdout(predicate::str::contains("done-b").not());
 }
+
+/// A git dep pinned to a nonexistent commit must not abort the run: the
+/// remaining deps still install and a warning summary is printed at the end.
+#[test]
+fn install_continues_past_bad_git_ref() {
+    let (_repo_a, repo_a_path) = common::local_git_repo_with_lib_subdir("liba");
+    let (_repo_b, repo_b_path) = common::local_git_repo_with_lib_subdir("libb");
+    let url_a = common::file_url(&repo_a_path);
+    let url_b = common::file_url(&repo_b_path);
+    let bogus_sha = "0123456789abcdef0123456789abcdef01234567";
+    let json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "contpast-a", "type": "git", "ref": "{bogus_sha}", "url": "{url_a}"}},
+            {{"name": "contpast-b", "type": "git", "ref": "main", "url": "{url_b}"}}
+        ]
+    }}"#
+    );
+    let temp = common::project_with_hmm_json(&json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("not found even after fetch"))
+        .stdout(predicate::str::contains("failed to install"));
+
+    // The good dep after the failing one still got installed
+    let current = std::fs::read_to_string(temp.child(".haxelib/contpast-b/.current").path()).unwrap();
+    assert_eq!(current, "git");
+    temp.child(".haxelib/contpast-b/git/README.md")
+        .assert(predicate::path::is_file());
+}
+
+/// A haxelib dep whose download fails must not abort the run either.
+#[test]
+fn install_continues_past_failed_haxelib_download() {
+    // Stub only serves contpast-d; contpast-c's download will 404
+    let stub = common::RegistryStub::serve(&[("contpast-d", "1.0.0")]);
+    let json = r#"{
+        "dependencies": [
+            {"name": "contpast-c", "type": "haxelib", "version": "1.0.0"},
+            {"name": "contpast-d", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .arg("install")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("contpast-c"))
+        .stdout(predicate::str::contains("failed to install"));
+
+    // The good dep after the failing one still got installed
+    let current = std::fs::read_to_string(temp.child(".haxelib/contpast-d/.current").path()).unwrap();
+    assert_eq!(current, "1.0.0");
+    temp.child(".haxelib/contpast-d/1,0,0/haxelib.json")
+        .assert(predicate::path::is_file());
+}

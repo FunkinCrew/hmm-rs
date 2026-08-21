@@ -59,30 +59,66 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -
         installs_needed.len().to_string().bold()
     );
 
+    let mut failures: Vec<(String, anyhow::Error)> = Vec::new();
+
     for install_status in installs_needed.iter() {
-        match &install_status.install_type {
-            InstallType::Missing => handle_install(install_status, separator)?,
-            InstallType::MissingGit => handle_install(install_status, separator)?,
-            InstallType::MissingDevLink => ensure_git_subdir_dev_link(install_status.lib)?,
+        let result = match &install_status.install_type {
+            InstallType::Missing => handle_install(install_status, separator),
+            InstallType::MissingGit => handle_install(install_status, separator),
+            InstallType::MissingDevLink => ensure_git_subdir_dev_link(install_status.lib),
             InstallType::Outdated => match &install_status.lib.haxelib_type {
-                HaxelibType::Haxelib => install_from_haxelib(install_status.lib)?,
-                HaxelibType::Git => install_or_update_git_cli(install_status.lib, separator)?,
-                lib_type => println!(
-                    "{}: Installing from {:?} not yet implemented",
-                    install_status.lib.name.red(),
-                    lib_type
-                ),
+                HaxelibType::Haxelib => install_from_haxelib(install_status.lib),
+                HaxelibType::Git => install_or_update_git_cli(install_status.lib, separator),
+                lib_type => {
+                    println!(
+                        "{}: Installing from {:?} not yet implemented",
+                        install_status.lib.name.red(),
+                        lib_type
+                    );
+                    Ok(())
+                }
             },
             InstallType::Conflict => {
                 // Handle git conflicts interactively
-                handle_git_conflict(install_status, separator)?;
+                handle_git_conflict(install_status, separator)
             }
-            InstallType::AlreadyInstalled => (), // do nothing on things already installed at the right version
-            _ => println!(
-                "{} {:?}: Not implemented",
-                install_status.lib.name, install_status.install_type
-            ),
+            InstallType::AlreadyInstalled => Ok(()), // do nothing on things already installed at the right version
+            _ => {
+                println!(
+                    "{} {:?}: Not implemented",
+                    install_status.lib.name, install_status.install_type
+                );
+                Ok(())
+            }
+        };
+
+        if let Err(e) = result {
+            println!(
+                "⚠ {} {}: {:#}",
+                "Failed to install".red(),
+                install_status.lib.name.red().bold(),
+                e
+            );
+            failures.push((install_status.lib.name.clone(), e));
         }
+    }
+
+    if !failures.is_empty() {
+        println!();
+        println!(
+            "⚠ {} of {} dependencies failed to install:",
+            failures.len().to_string().red().bold(),
+            installs_needed.len().to_string().bold()
+        );
+        for (name, err) in &failures {
+            println!("  - {}: {:#}", name.red(), err);
+        }
+        let noun = if failures.len() == 1 {
+            "dependency"
+        } else {
+            "dependencies"
+        };
+        return Err(anyhow!("{} {} failed to install", failures.len(), noun));
     }
 
     Ok(())
