@@ -211,8 +211,6 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
         }
     }
 
-    create_current_file(&output_dir, &haxelib.version()?.to_string())?;
-
     // unzipping
     let archive =
         File::open(&tmp_dir).context(format!("Failed to open downloaded zip: {:?}", tmp_dir))?;
@@ -261,6 +259,11 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
             io::copy(&mut entry, &mut outfile)?;
         }
     }
+
+    // Written only after extraction succeeds: a mid-extraction failure must not
+    // leave a .current claiming a version whose directory is partial or absent
+    // (`check` never inspects the version dir).
+    create_current_file(&output_dir, &haxelib.version()?.to_string())?;
 
     std::fs::remove_file(&tmp_dir)?;
 
