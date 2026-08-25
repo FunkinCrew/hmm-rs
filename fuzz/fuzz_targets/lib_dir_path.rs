@@ -22,4 +22,14 @@ fuzz_target!(|name: &str| {
         2,
         "{name:?} did not yield a single directory under .haxelib: {path:?}"
     );
+
+    // The encoding must be invertible for accepted names (validation rejects
+    // commas), which makes the mapping injective: `a,b` can never alias `a.b`.
+    let encoded = path.file_name().unwrap().to_str().unwrap();
+    assert!(!encoded.contains('.'), "{name:?} left a dot in {encoded:?}");
+    assert_eq!(
+        encoded.replace(',', "."),
+        name,
+        "{name:?} does not round-trip through the comma encoding"
+    );
 });

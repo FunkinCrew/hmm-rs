@@ -131,9 +131,13 @@ proptest! {
     }
 
     /// The dots-to-commas filesystem encoding is invertible for valid library
-    /// names (which can never contain commas).
+    /// names. `validate_lib_name` enforces the haxelib charset `[A-Za-z0-9_.-]`
+    /// (no commas), so this generator IS the valid-name set and the round-trip
+    /// makes `lib_dir_path_for_name` injective over it: two distinct valid
+    /// names can never share a `.haxelib/` directory.
     #[test]
     fn comma_encoding_round_trips(name in "[A-Za-z0-9_.-]{1,24}") {
+        prop_assert!(validate_lib_name(&name).is_ok(), "charset name rejected: {:?}", name);
         let dir = lib_dir_path_for_name(&name);
         let encoded = dir.file_name().unwrap().to_str().unwrap().to_string();
         prop_assert!(!encoded.contains('.'));
@@ -155,12 +159,24 @@ proptest! {
         prop_assert_eq!(path.components().count(), 2, "{:?} -> {:?}", name, path);
     }
 
-    /// Validation never accepts a name carrying a separator or control char.
+    /// Validation never accepts a name carrying a separator, control char, or
+    /// comma (commas would alias the dot encoding: `a,b` == `a.b` on disk).
     #[test]
     fn validation_rejects_separators_and_controls(name in adversarial_name()) {
-        if name.contains('/') || name.contains('\\') || name.contains(char::is_control) {
+        if name.contains('/') || name.contains('\\') || name.contains(char::is_control) || name.contains(',') {
             prop_assert!(validate_lib_name(&name).is_err(), "accepted {:?}", name);
         }
+    }
+
+    /// Validation is exactly the haxelib charset: non-empty and every char in
+    /// `[A-Za-z0-9_.-]` (what haxelib's `Data.safe` requires). Names outside it
+    /// can never work with `haxelib path`, and names inside it are shell-safe
+    /// and encoding-safe.
+    #[test]
+    fn validation_is_exactly_the_haxelib_charset(name in adversarial_name()) {
+        let in_charset = !name.is_empty()
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+        prop_assert_eq!(validate_lib_name(&name).is_ok(), in_charset, "name: {:?}", name);
     }
 
     /// Arbitrary bytes must never panic the hmm.json parser.

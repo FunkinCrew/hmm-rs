@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Haxelib {
@@ -125,10 +125,6 @@ impl Haxelib {
         Ok(self.version()?.replace(".", ","))
     }
 
-    pub fn name_as_commas(&self) -> String {
-        self.name.replace(".", ",")
-    }
-
     /// Returns the library directory path: .haxelib/{name_with_commas}
     pub fn lib_dir_path(&self) -> PathBuf {
         lib_dir_path_for_name(&self.name)
@@ -145,40 +141,36 @@ pub fn lib_dir_path_for_name(name: &str) -> PathBuf {
     PathBuf::from(".haxelib").join(name.replace(".", ","))
 }
 
-/// Rejects library names that would escape `.haxelib/` or corrupt generated
-/// output. Real haxelib names are alphanumeric plus `.`, `-` and `_`; this only
-/// enforces the safety-critical subset, so that `lib_dir_path_for_name` always
-/// resolves to a single directory inside `.haxelib/`.
+/// Enforces the haxelib name charset: `A-Z a-z 0-9 _ . -` (the allowlist
+/// `Data.safe` in the real haxelib client validates before dot-to-comma
+/// encoding). Anything outside it can never work with the real toolchain
+/// (`haxelib path` throws "Invalid parameter"), so rejecting here loses
+/// nothing and guarantees:
+/// - `lib_dir_path_for_name` is injective (commas are rejected, so `a,b`
+///   can no longer alias `a.b`) and always resolves to a single directory
+///   inside `.haxelib/` (no separators, and `..` encodes to `,,`),
+/// - names are safe in the compiler's unquoted `haxelib path <names>`
+///   shell-out and byte-length-correct in the remoting serialization.
 ///
-/// Note the dot-to-comma encoding already neutralizes `..` (it becomes `,,`),
-/// so the holes this closes are path separators, absolute paths and control
-/// characters.
+/// Deliberately omitted from haxelib's `ProjectName` rules: min length 3,
+/// reserved names (`haxe`, `all`) and `.zip`/`.hxml` suffixes — those are
+/// registry-publishing rules, and short git/dev names work fine with the
+/// bundled haxelib client.
 pub fn validate_lib_name(name: &str) -> Result<()> {
-    if name.trim().is_empty() {
+    if name.is_empty() {
         return Err(anyhow!("invalid library name: empty"));
     }
-    if name.contains('/') || name.contains('\\') {
+    if let Some(c) = name
+        .chars()
+        .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-')))
+    {
         return Err(anyhow!(
-            "invalid library name '{}': path separators are not allowed",
-            name
+            "invalid library name '{}': character {:?} is not allowed (haxelib names may only contain A-Z a-z 0-9 _ . -)",
+            name.escape_debug(),
+            c
         ));
     }
-    if name.contains(char::is_control) {
-        return Err(anyhow!(
-            "invalid library name '{}': control characters are not allowed",
-            name.escape_debug()
-        ));
-    }
-
-    let encoded = name.replace(".", ",");
-    let mut components = Path::new(&encoded).components();
-    match (components.next(), components.next()) {
-        (Some(Component::Normal(_)), None) => Ok(()),
-        _ => Err(anyhow!(
-            "invalid library name '{}': must be a single path component",
-            name
-        )),
-    }
+    Ok(())
 }
 
 /// Returns the git repo path given a library name
@@ -220,32 +212,26 @@ mod tests {
         }
     }
 
-    // --- name_as_commas ---
-
-    #[test]
-    fn test_name_as_commas_with_dots() {
-        let h = make_haxelib("funkin.vis", HaxelibType::Git, None, None, None);
-        assert_eq!(h.name_as_commas(), "funkin,vis");
-    }
-
-    #[test]
-    fn test_name_as_commas_without_dots() {
-        let h = make_haxelib("flixel", HaxelibType::Git, None, None, None);
-        assert_eq!(h.name_as_commas(), "flixel");
-    }
-
-    #[test]
-    fn test_name_as_commas_multiple_dots() {
-        let h = make_haxelib("a.b.c", HaxelibType::Git, None, None, None);
-        assert_eq!(h.name_as_commas(), "a,b,c");
-    }
-
     // --- version_as_commas ---
 
     #[test]
     fn test_version_as_commas() {
         let h = make_haxelib("flixel", HaxelibType::Haxelib, Some("3.3.0"), None, None);
         assert_eq!(h.version_as_commas().unwrap(), "3,3,0");
+    }
+
+    #[test]
+    fn test_version_as_commas_prerelease() {
+        // Pre-release dots are encoded too: haxelib's Data.safe applies to the
+        // whole version string (e.g. dir `1,0,0-alpha,1`).
+        let h = make_haxelib(
+            "flixel",
+            HaxelibType::Haxelib,
+            Some("1.0.0-alpha.1"),
+            None,
+            None,
+        );
+        assert_eq!(h.version_as_commas().unwrap(), "1,0,0-alpha,1");
     }
 
     // --- path construction ---
@@ -286,6 +272,19 @@ mod tests {
         assert_eq!(
             h.download_url().unwrap(),
             "https://lib.haxe.org/p/flixel-addons/3.3.0/download"
+        );
+    }
+
+    #[test]
+    fn test_download_url_haxelib_dotted_name_stays_raw() {
+        // The /p/<name>/<version>/download website route takes the RAW dotted
+        // name and version (it redirects to the comma-encoded
+        // files/3.0/<safe(name)>-<safe(ver)>.zip itself). Do not "fix" this to
+        // the comma form.
+        let h = make_haxelib("funkin.vis", HaxelibType::Haxelib, Some("1.0.0"), None, None);
+        assert_eq!(
+            h.download_url().unwrap(),
+            "https://lib.haxe.org/p/funkin.vis/1.0.0/download"
         );
     }
 
@@ -396,6 +395,31 @@ mod tests {
         // `/tmp/x` is the regression case: without validation,
         // `.haxelib`.join("/tmp/x") discards the base and yields `/tmp/x`.
         for name in ["/tmp/x", "a/b", "a\\b", "", "   ", "\u{0}", "a\nb"] {
+            assert!(
+                validate_lib_name(name).is_err(),
+                "{name:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_lib_name_rejects_commas() {
+        // Commas are the dot-encoding on disk: `a,b` would alias `a.b`
+        // (both map to `.haxelib/a,b`), so they must never be accepted.
+        for name in ["a,b", "funkin,vis", ",", "a,"] {
+            assert!(
+                validate_lib_name(name).is_err(),
+                "{name:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_lib_name_rejects_non_haxelib_charset() {
+        // Real haxelib's Data.safe allows only [A-Za-z0-9_.-]; anything else
+        // throws "Invalid parameter" in `haxelib path`, so hmm-rs rejects it
+        // up front.
+        for name in ["a b", "a@b", "a:b", "a#b", "a%b", "a*b", "a?b", "\u{e9}clair"] {
             assert!(
                 validate_lib_name(name).is_err(),
                 "{name:?} should be rejected"
