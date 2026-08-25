@@ -122,6 +122,9 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
             ));
         }
     };
+    // haxelib always trims .current/.dev on read; a trailing newline written
+    // by another tool must not read as a different version.
+    current_version = current_version.trim().to_string();
 
     match haxelib.haxelib_type {
         HaxelibType::Haxelib => match haxelib.version.as_ref() {

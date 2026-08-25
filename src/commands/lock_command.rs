@@ -127,6 +127,8 @@ fn lock_haxelib_dependency(lib: &mut Haxelib) -> Result<LockResult> {
 
     let mut current_version = String::new();
     File::open(&current_file)?.read_to_string(&mut current_version)?;
+    // haxelib always trims .current on read; don't lock "1.0.0\n" into hmm.json.
+    let current_version = current_version.trim().to_string();
 
     // Update the library with the locked version
     lib.version = Some(current_version.clone());
