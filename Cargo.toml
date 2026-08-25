@@ -18,7 +18,7 @@ clap = { version = "4.5.20", features = ["derive", "unicode", "wrap_help"] }
 console = "0.16.2"
 futures = "0.3.30"
 futures-util = "0.3.30"
-gix = { version = "0.84.0", default-features = false, features = [
+gix = { version = "0.87.1", default-features = false, features = [
     "sha1",
     "revision",
     "index",
@@ -26,7 +26,6 @@ gix = { version = "0.84.0", default-features = false, features = [
     "worktree-mutation",
     "blocking-http-transport-reqwest-rust-tls",
     "status",
-    "zlib-ng",
     "serde",
     "max-performance",
     "tracing-detail",

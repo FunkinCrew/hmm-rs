@@ -5,8 +5,8 @@
 #   fuzz/run.sh 900              # every target, 900s each
 #   fuzz/run.sh 900 parse_spec   # one target
 #
-# Uses `-s none`: every target is safe Rust (the crate has no `unsafe`), and
-# ASan over gix's vendored C (zlib-ng) is a needless source of noise. Run with
+# Uses `-s none`: every target is safe Rust (the crate has no `unsafe`, and
+# gix's zlib backend is pure-Rust zlib-rs), so sanitizers only add noise. Run with
 # `ASAN_OPTIONS=detect_leaks=0 cargo +nightly fuzz run <target>` for a
 # sanitized pass locally.
 set -euo pipefail
