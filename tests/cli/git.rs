@@ -220,3 +220,47 @@ fn install_relinks_missing_dev_file_for_subdir_git() {
     let dev_content = std::fs::read_to_string(dev_file.path()).unwrap();
     assert!(dev_content.contains("git/mylib"));
 }
+
+// --- dotted library names (`funkin.vis`-style) ---
+
+#[test]
+fn git_dotted_name_uses_comma_dir() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let url = common::file_url(&repo_path);
+    let temp = common::initialized_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["git", "gitdot.vis", &url, "main"])
+        .assert()
+        .success();
+
+    temp.child(".haxelib/gitdot,vis/git")
+        .assert(predicate::path::is_dir());
+    let current =
+        std::fs::read_to_string(temp.child(".haxelib/gitdot,vis/.current").path()).unwrap();
+    assert_eq!(current, "git");
+
+    let json_content = std::fs::read_to_string(temp.child("hmm.json").path()).unwrap();
+    assert!(json_content.contains("\"name\": \"gitdot.vis\""));
+}
+
+/// Comma names are rejected up front: `a,b` would alias `a.b` on disk.
+#[test]
+fn git_rejects_comma_name() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let url = common::file_url(&repo_path);
+    let temp = common::initialized_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["git", "a,b", &url, "main"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is not allowed"));
+
+    temp.child(".haxelib/a,b")
+        .assert(predicate::path::missing());
+}

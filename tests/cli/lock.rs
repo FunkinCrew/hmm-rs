@@ -246,3 +246,94 @@ fn lock_unknown_lib_warns_and_proceeds() {
         .stdout(predicate::str::contains("not found in hmm.json"))
         .stdout(predicate::str::contains("locked to"));
 }
+
+// --- dotted library names (`funkin.vis`-style) ---
+
+#[test]
+fn lock_dotted_haxelib_writes_version_to_json() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "lockdot.vis", "type": "haxelib", "version": null}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("lockdot.vis", "3.1.0")]);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("lock")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("locked to"));
+
+    let updated_json = std::fs::read_to_string(temp.child("hmm.json").path()).unwrap();
+    assert!(updated_json.contains("\"name\": \"lockdot.vis\""));
+    assert!(updated_json.contains("\"version\": \"3.1.0\""));
+}
+
+/// Regression: `.current` content is trimmed before locking, so a trailing
+/// newline never lands inside the hmm.json version string.
+#[test]
+fn lock_trims_trailing_newline_from_current() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "trimlock-a", "type": "haxelib", "version": null}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("trimlock-a", "3.1.0")]);
+    std::fs::write(temp.child(".haxelib/trimlock-a/.current").path(), "3.1.0\n").unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("lock")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("locked to"));
+
+    let updated_json = std::fs::read_to_string(temp.child("hmm.json").path()).unwrap();
+    assert!(
+        updated_json.contains("\"version\": \"3.1.0\""),
+        "version should be locked without the trailing newline, got: {updated_json}"
+    );
+}
+
+#[test]
+fn lock_dotted_git_writes_commit_sha() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let head_sha = common::git_rev_parse(&repo_path, "HEAD");
+    let json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "lockgitdot.vis", "type": "git", "ref": "main", "url": "{}"}}
+        ]
+    }}"#,
+        common::file_url(&repo_path)
+    );
+    let temp = common::project_with_hmm_json(&json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("lock")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("locked to"));
+
+    let locked = read_locked_ref(&temp);
+    assert_ne!(locked, "main");
+    assert!(
+        head_sha.starts_with(&locked),
+        "expected a prefix of {head_sha}, got {locked}"
+    );
+
+    let updated_json = std::fs::read_to_string(temp.child("hmm.json").path()).unwrap();
+    assert!(updated_json.contains("\"name\": \"lockgitdot.vis\""));
+}

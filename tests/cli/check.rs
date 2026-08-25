@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use assert_fs::prelude::*;
 use predicates::prelude::*;
 
 use crate::common;
@@ -245,4 +246,100 @@ fn check_unknown_lib_warns() {
         .assert()
         .success()
         .stdout(predicate::str::contains("not found in hmm.json"));
+}
+
+// --- dotted library names (`funkin.vis`-style) ---
+
+#[test]
+fn check_dotted_haxelib_installed_ok() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "chkdot.vis", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("chkdot.vis", "1.0.0")]);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "dependencie(s) are installed at the correct versions",
+        ));
+}
+
+#[test]
+fn check_dotted_git_installed_ok() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let url = common::file_url(&repo_path);
+    let json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "chkgitdot.vis", "type": "git", "ref": "main", "url": "{url}"}}
+        ]
+    }}"#
+    );
+    let temp = common::project_with_hmm_json(&json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "dependencie(s) are installed at the correct versions",
+        ));
+}
+
+/// Regression: haxelib always trims `.current` on read. A trailing newline
+/// written by another tool must not read as a different version.
+#[test]
+fn check_current_with_trailing_newline_is_not_outdated() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "trimchk-a", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("trimchk-a", "1.0.0")]);
+    std::fs::write(temp.child(".haxelib/trimchk-a/.current").path(), "1.0.0\n").unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "dependencie(s) are installed at the correct versions",
+        ));
+}
+
+/// Comma names are rejected at the hmm.json read choke point: `a,b` would
+/// alias `a.b` on disk (both map to `.haxelib/a,b`).
+#[test]
+fn check_rejects_comma_name_in_hmm_json() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "a,b", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is not allowed"));
 }

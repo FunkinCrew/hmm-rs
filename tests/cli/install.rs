@@ -306,3 +306,94 @@ fn install_continues_past_failed_haxelib_download() {
     temp.child(".haxelib/contpast-d/1,0,0/haxelib.json")
         .assert(predicate::path::is_file());
 }
+
+// --- dotted library names (`funkin.vis`-style) ---
+// Every filesystem surface must use the comma-encoded directory
+// (`instdot.vis` -> `.haxelib/instdot,vis`), matching haxelib's Data.safe.
+
+#[test]
+fn install_dotted_haxelib_uses_comma_dirs() {
+    let stub = common::RegistryStub::serve(&[("instdot.vis", "1.0.0")]);
+    let json = r#"{
+        "dependencies": [
+            {"name": "instdot.vis", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .arg("install")
+        .assert()
+        .success();
+
+    // Comma-encoded name dir + comma-encoded version dir; .current keeps the
+    // raw dotted version. This is the exact layout `haxelib path` resolves.
+    let current =
+        std::fs::read_to_string(temp.child(".haxelib/instdot,vis/.current").path()).unwrap();
+    assert_eq!(current, "1.0.0");
+    temp.child(".haxelib/instdot,vis/1,0,0/haxelib.json")
+        .assert(predicate::path::is_file());
+    temp.child(".haxelib/instdot.vis")
+        .assert(predicate::path::missing());
+}
+
+#[test]
+fn install_dotted_git_dep_uses_comma_dirs() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let url = common::file_url(&repo_path);
+    let json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "instgitdot.vis", "type": "git", "ref": "main", "url": "{url}"}}
+        ]
+    }}"#
+    );
+    let temp = common::project_with_hmm_json(&json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success();
+
+    let current =
+        std::fs::read_to_string(temp.child(".haxelib/instgitdot,vis/.current").path()).unwrap();
+    assert_eq!(current, "git");
+    temp.child(".haxelib/instgitdot,vis/git/README.md")
+        .assert(predicate::path::is_file());
+}
+
+#[test]
+fn install_dotted_git_dep_with_dir_writes_dev_into_subdir() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let url = common::file_url(&repo_path);
+    let json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "instdirdot.vis", "type": "git", "ref": "main", "url": "{url}", "dir": "mylib"}}
+        ]
+    }}"#
+    );
+    let temp = common::project_with_hmm_json(&json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success();
+
+    let dev_file = temp.child(".haxelib/instdirdot,vis/.dev");
+    dev_file.assert(predicate::path::is_file());
+    let dev_content = std::fs::read_to_string(dev_file.path()).unwrap();
+    assert!(
+        dev_content
+            .replace('\\', "/")
+            .contains("instdirdot,vis/git/mylib"),
+        "dev file should point into the comma-dir's git/mylib subdir, got: {dev_content}"
+    );
+}

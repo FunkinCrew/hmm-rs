@@ -125,3 +125,36 @@ fn remove_alias_rm_works() {
         .assert()
         .success();
 }
+
+// --- dotted library names (`funkin.vis`-style) ---
+
+/// `remove` on a dotted name must delete the comma-encoded directory (and
+/// leave everything else alone).
+#[test]
+fn remove_dotted_name_deletes_comma_dir() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "rmdot.vis", "type": "haxelib", "version": "1.0.0"},
+            {"name": "keep-lib", "type": "haxelib", "version": "2.0.0"}
+        ]
+    }"#;
+    let temp =
+        common::project_with_installed_haxelibs(json, &[("rmdot.vis", "1.0.0"), ("keep-lib", "2.0.0")]);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["remove", "rmdot.vis"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("removed"));
+
+    let updated_json = std::fs::read_to_string(temp.child("hmm.json").path()).unwrap();
+    assert!(!updated_json.contains("rmdot.vis"));
+    assert!(updated_json.contains("keep-lib"));
+
+    temp.child(".haxelib/rmdot,vis")
+        .assert(predicate::path::missing());
+    temp.child(".haxelib/keep-lib/.current")
+        .assert(predicate::path::is_file());
+}

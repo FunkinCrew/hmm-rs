@@ -92,3 +92,72 @@ fn haxelib_no_args_errors() {
         .failure()
         .stderr(predicate::str::contains("required"));
 }
+
+// --- dotted library names (`funkin.vis`-style) ---
+// The registry is queried with the RAW dotted name (both the /p/ download
+// route and the remoting getLatestVersion call); only the on-disk dirs use
+// the comma encoding.
+
+#[test]
+fn haxelib_dotted_with_version_installs_from_registry() {
+    let stub = common::RegistryStub::serve(&[("regdot.vis", "1.2.3")]);
+    let temp = common::initialized_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .args(["haxelib", "regdot.vis@1.2.3"])
+        .assert()
+        .success();
+
+    let current =
+        std::fs::read_to_string(temp.child(".haxelib/regdot,vis/.current").path()).unwrap();
+    assert_eq!(current, "1.2.3");
+    temp.child(".haxelib/regdot,vis/1,2,3/haxelib.json")
+        .assert(predicate::path::is_file());
+
+    let json_content = std::fs::read_to_string(temp.child("hmm.json").path()).unwrap();
+    assert!(json_content.contains("\"name\": \"regdot.vis\""));
+    assert!(json_content.contains("\"version\": \"1.2.3\""));
+}
+
+#[test]
+fn haxelib_dotted_without_version_queries_latest() {
+    let stub = common::RegistryStub::serve(&[("regdotl.vis", "2.0.0")]);
+    let temp = common::initialized_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .args(["haxelib", "regdotl.vis"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Latest version of regdotl.vis is 2.0.0",
+        ));
+
+    let current =
+        std::fs::read_to_string(temp.child(".haxelib/regdotl,vis/.current").path()).unwrap();
+    assert_eq!(current, "2.0.0");
+}
+
+/// Comma names are rejected before anything touches the network or disk.
+#[test]
+fn haxelib_rejects_comma_name() {
+    let stub = common::RegistryStub::serve(&[]);
+    let temp = common::initialized_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .args(["haxelib", "reg,comma@1.0.0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is not allowed"));
+
+    temp.child(".haxelib/reg,comma")
+        .assert(predicate::path::missing());
+}
