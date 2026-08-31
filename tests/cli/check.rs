@@ -107,12 +107,86 @@ fn check_filtered_only_processes_named_libs() {
     Command::cargo_bin("hmm-rs")
         .unwrap()
         .current_dir(temp.path())
-        .args(["check", "lib-a"])
+        .args(["check", "--verbose", "lib-a"])
         .assert()
         .success()
         .stdout(predicate::str::contains("dependencie(s) are installed"))
         .stdout(predicate::str::contains("Checking lib-b").not())
         .stdout(predicate::str::contains("Checking lib-c").not());
+}
+
+#[test]
+fn check_default_hides_correct_libs() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "lib-a", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("lib-a", "1.0.0")]);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "dependencie(s) are installed at the correct versions",
+        ))
+        .stdout(predicate::str::contains("lib-a").not())
+        .stdout(predicate::str::contains("are out of date or have changes").not());
+}
+
+#[test]
+fn check_default_shows_problems_and_count() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "lib-a", "type": "haxelib", "version": "1.0.0"},
+            {"name": "lib-b", "type": "haxelib", "version": "2.0.0"}
+        ]
+    }"#;
+    let temp =
+        common::project_with_installed_haxelibs(json, &[("lib-a", "1.0.0"), ("lib-b", "1.0.0")]);
+
+    // bold ANSI codes wrap the count, so match the text after it
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("is not at the correct version"))
+        .stdout(predicate::str::contains("lib-a").not())
+        .stdout(predicate::str::contains(
+            "dependencie(s) are out of date or have changes",
+        ));
+}
+
+#[test]
+fn check_verbose_shows_all_libs() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "lib-a", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("lib-a", "1.0.0")]);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["check", "--verbose"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("lib-a"));
+
+    // -v short form, before the subcommand (global flag)
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["-v", "check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("lib-a"));
 }
 
 // --- git-branch statuses (hermetic: local repos over file://) ---

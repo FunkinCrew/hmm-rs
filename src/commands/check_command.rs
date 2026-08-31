@@ -43,19 +43,25 @@ impl<'a> HaxelibStatus<'a> {
     }
 }
 
-pub fn check(deps: &Dependancies, names: &[String]) -> Result<()> {
+pub fn check(deps: &Dependancies, names: &[String], verbose: bool) -> Result<()> {
     let filtered = deps.filter_by_names(names);
     let total = filtered.len();
-    let installs = compare_haxelib_to_hmm(&filtered, true)?;
+    let installs = compare_haxelib_to_hmm(&filtered, verbose)?;
+    let installed_count = installs
+        .iter()
+        .filter(|i| i.install_type == InstallType::AlreadyInstalled)
+        .count();
     println!(
         "{} / {} dependencie(s) are installed at the correct versions",
-        installs
-            .iter()
-            .filter(|i| i.install_type == InstallType::AlreadyInstalled)
-            .count()
-            .bold(),
+        installed_count.bold(),
         total.bold()
     );
+    if !verbose && installed_count < total {
+        println!(
+            "{} dependencie(s) are out of date or have changes",
+            (total - installed_count).bold()
+        );
+    }
     Ok(())
 }
 

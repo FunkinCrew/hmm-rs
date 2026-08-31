@@ -183,7 +183,11 @@ pub fn run() -> Result<()> {
         Commands::Init => commands::init_command::init_hmm()?,
         Commands::Clean => commands::clean_command::remove_haxelib_folder()?,
         Commands::ToHxml { hxml } => commands::tohxml_command::dump_to_hxml(&load_deps()?, hxml)?,
-        Commands::Check { filter } => commands::check_command::check(&load_deps()?, &filter.lib)?,
+        Commands::Check { filter } => commands::check_command::check(
+            &load_deps()?,
+            &filter.lib,
+            args.global_opts.verbose > 0,
+        )?,
         Commands::Install { filter } => commands::install_command::install_from_hmm(
             &load_deps()?,
             &filter.lib,
