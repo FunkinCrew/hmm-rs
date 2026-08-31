@@ -28,7 +28,7 @@ fn check_for_update(current: &str) -> Result<()> {
         .fetch()
         .context("Failed to fetch releases from GitHub")?;
 
-    let latest = match releases.first() {
+    let latest = match releases.latest() {
         Some(release) => release,
         None => {
             println!("No releases published yet.");
@@ -36,7 +36,7 @@ fn check_for_update(current: &str) -> Result<()> {
         }
     };
 
-    let latest_version = &latest.version;
+    let latest_version = latest.version();
 
     if semver::Version::parse(latest_version)? > semver::Version::parse(current)? {
         println!(
@@ -74,20 +74,21 @@ fn perform_upgrade(current: &str) -> Result<()> {
         .context("Failed to update binary")?;
 
     match status {
-        self_update::Status::UpToDate(v) => {
+        self_update::VersionStatus::UpToDate(v) => {
             println!(
                 "{} v{} is the latest version.",
                 "Up to date:".green().bold(),
                 v
             );
         }
-        self_update::Status::Updated(v) => {
+        self_update::VersionStatus::Updated(v) => {
             println!(
                 "{} hmm-rs has been updated to v{}!",
                 "Updated:".green().bold(),
                 v
             );
         }
+        _ => {}
     }
 
     Ok(())
