@@ -5,7 +5,7 @@
 //! in every `cargo test`, so the invariants are enforced on every PR.
 
 use hmm_rs::commands::haxelib_command::{parse_remoting_response, parse_spec};
-use hmm_rs::commands::install_command::sanitize_zip_entry;
+use hmm_rs::commands::install_command::{parse_git_progress, sanitize_zip_entry, GitProgress};
 use hmm_rs::commands::tohxml_command::render_hxml;
 use hmm_rs::hmm::dependencies::Dependancies;
 use hmm_rs::hmm::haxelib::{lib_dir_path_for_name, validate_lib_name, Haxelib, HaxelibType};
@@ -321,5 +321,57 @@ proptest! {
 
         let text = std::fs::read_to_string(&json_path).unwrap();
         prop_assert!(!text.contains("\"dir\""), "dir: None must be omitted, got: {}", text);
+    }
+}
+
+proptest! {
+    /// parse_git_progress must never panic, whatever git (or a fuzzer) says.
+    #[test]
+    fn git_progress_never_panics(s in "\\PC{0,80}") {
+        let _ = parse_git_progress(&s);
+    }
+
+    /// A line rendered exactly the way git's progress.c prints it, optionally
+    /// behind the sideband `remote: ` prefix and its padding, parses back into
+    /// the same title, counts, throughput tail and done flag.
+    #[test]
+    fn git_progress_parses_lines_git_prints(
+        title in "[A-Za-z]{1,12}( [A-Za-z]{1,12}){0,2}"
+            .prop_filter("a bare sideband prefix is not a title", |t| t != "remote"),
+        current in 0u64..1_000_000,
+        total in 1u64..1_000_000,
+        with_total in any::<bool>(),
+        throughput in proptest::option::of(
+            "[0-9]{1,4}\\.[0-9]{2} [KMG]iB \\| [0-9]{1,4}\\.[0-9]{2} [KMG]iB/s"
+        ),
+        remote in any::<bool>(),
+        done in any::<bool>(),
+    ) {
+        let current = if with_total { current.min(total) } else { current };
+        let detail = throughput.map(|t| format!(", {t}")).unwrap_or_default();
+        let counters = if with_total {
+            format!("{:3}% ({current}/{total})", current * 100 / total)
+        } else {
+            current.to_string()
+        };
+        let line = format!(
+            "{}{title}: {counters}{detail}{}{}",
+            if remote { "remote: " } else { "" },
+            if done { ", done." } else { "" },
+            if remote { "        " } else { "" },
+        );
+
+        prop_assert_eq!(
+            parse_git_progress(&line),
+            Some(GitProgress {
+                title: title.clone(),
+                current,
+                total: with_total.then_some(total),
+                detail,
+                done,
+            }),
+            "line: {:?}",
+            line
+        );
     }
 }

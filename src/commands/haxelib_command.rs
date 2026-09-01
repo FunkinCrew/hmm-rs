@@ -68,7 +68,7 @@ pub fn install_haxelibs(specs: &[String], json_path: PathBuf) -> Result<()> {
         let (name, version) = parse_spec(spec)?;
         hmm::haxelib::validate_lib_name(name)?;
         let haxelib_install = build_haxelib_install(name, version)?;
-        commands::install_command::install_from_haxelib(&haxelib_install)?;
+        commands::install_command::install_from_haxelib(&haxelib_install, None)?;
         hmm::json::upsert_dependencies(&json_path, &[haxelib_install])?;
     }
     Ok(())

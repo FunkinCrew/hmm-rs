@@ -397,3 +397,81 @@ fn install_dotted_git_dep_with_dir_writes_dev_into_subdir() {
         "dev file should point into the comma-dir's git/mylib subdir, got: {dev_content}"
     );
 }
+
+/// Step-by-step git narration ("Checking out …", "✓ Checked out …") is
+/// verbose-only; the default output is the lead line plus the result.
+#[test]
+fn install_git_narration_only_with_verbose() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("lib");
+    let url = common::file_url(&repo_path);
+    let json = format!(
+        r#"{{"dependencies": [{{"name": "quiet-git", "type": "git", "ref": "main", "url": "{url}"}}]}}"#
+    );
+    let temp = common::project_with_hmm_json(&json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cloning quiet-git"))
+        .stdout(predicate::str::contains("installed"))
+        .stdout(predicate::str::contains("Checking out").not())
+        .stdout(predicate::str::contains("Checked out").not())
+        .stdout(predicate::str::contains("clone completed").not())
+        .stdout(predicate::str::contains("Renaming remote").not());
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("clean")
+        .assert()
+        .success();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["install", "-v"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Blobless clone completed"))
+        .stdout(predicate::str::contains("Renaming remote origin"))
+        .stdout(predicate::str::contains("Checking out quiet-git at main"))
+        .stdout(predicate::str::contains("Checked out main (local)"));
+}
+
+/// The "done downloading" step line is verbose-only too.
+#[test]
+fn install_haxelib_narration_only_with_verbose() {
+    let stub = common::RegistryStub::serve(&[("quiet-hx", "1.0.0")]);
+    let json = r#"{"dependencies": [{"name": "quiet-hx", "type": "haxelib", "version": "1.0.0"}]}"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Downloading: "))
+        .stdout(predicate::str::contains("installed"))
+        .stdout(predicate::str::contains("done downloading").not());
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("clean")
+        .assert()
+        .success();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .args(["install", "-v"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("done downloading"));
+}

@@ -1,7 +1,18 @@
+/// `println!` for step-by-step narration ("Checking out …", "✓ Cloned …");
+/// silent unless `-v`/`--verbose` was passed.
+macro_rules! vprintln {
+    ($($arg:tt)*) => {
+        if $crate::verbose() {
+            println!($($arg)*);
+        }
+    };
+}
+
 pub mod commands;
 pub mod hmm;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Ok, Result};
 
@@ -166,8 +177,16 @@ enum LockCommands {
     Check,
 }
 
+static VERBOSE: AtomicBool = AtomicBool::new(false);
+
+/// True when `-v`/`--verbose` was passed; gates step-by-step narration.
+pub fn verbose() -> bool {
+    VERBOSE.load(Ordering::Relaxed)
+}
+
 pub fn run() -> Result<()> {
     let args = Cli::parse();
+    VERBOSE.store(args.global_opts.verbose > 0, Ordering::Relaxed);
 
     let path = args.global_opts.json.clone().unwrap();
     let load_deps = || hmm::json::read_json(&path);

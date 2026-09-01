@@ -57,13 +57,13 @@ pub fn install_git(
 
     // If no ref specified, detect the default branch
     if haxelib_install.vcs_ref.is_none() {
-        println!("No ref specified, will use repository's default branch");
+        vprintln!("No ref specified, will use repository's default branch");
         // We could query the remote here to get the default branch, but it's easier
         // to let git clone handle it and then query the checked out branch
     }
 
     // Install the git repository
-    commands::install_command::install_or_update_git_cli(&haxelib_install, separator)?;
+    commands::install_command::install_or_update_git_cli(&haxelib_install, separator, None)?;
 
     // If we didn't have a ref, get the current HEAD after clone
     if haxelib_install.vcs_ref.is_none() {

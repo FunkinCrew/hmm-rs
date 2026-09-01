@@ -6,12 +6,14 @@ use anyhow::Ok;
 use anyhow::{anyhow, Context, Result};
 use console::Emoji;
 use futures_util::StreamExt;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressFinish, ProgressStyle};
 use reqwest::Client as ReqwestClient;
 use std::env;
 use std::fs::File;
-use std::io::{self, stdin, stdout, Write};
+use std::io::{self, stdin, stdout, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::process::{ExitStatus, Stdio};
+use std::time::Duration;
 use owo_colors::OwoColorize;
 use zip::ZipArchive;
 
@@ -41,6 +43,296 @@ fn path_to_str(path: &Path) -> Result<&str> {
         .ok_or_else(|| anyhow!("Path contains invalid UTF-8: {}", path.display()))
 }
 
+/// Spinner refresh interval while a bar waits on the network or on git.
+const BAR_TICK: Duration = Duration::from_millis(100);
+
+fn download_bar_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{spinner:.green} {prefix:.bold} downloading [{wide_bar:.yellow/red}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+    )
+    .expect("valid progress template")
+}
+
+fn download_spinner_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{spinner:.green} {prefix:.bold} downloading {bytes} ({bytes_per_sec}, {elapsed})",
+    )
+    .expect("valid progress template")
+}
+
+fn extract_bar_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{spinner:.green} {prefix:.bold} extracting [{wide_bar:.cyan/blue}] {pos}/{len}",
+    )
+    .expect("valid progress template")
+}
+
+fn git_bar_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{spinner:.green} {prefix:.bold} {msg} [{wide_bar:.yellow/red}] {percent}% ({pos}/{len}) {elapsed}",
+    )
+    .expect("valid progress template")
+}
+
+fn git_spinner_style() -> ProgressStyle {
+    ProgressStyle::with_template("{spinner:.green} {prefix:.bold} {msg} {elapsed}")
+        .expect("valid progress template")
+}
+
+/// `[2/5]` during a batch install, `None` for a single-library command.
+fn counter_tag(counter: Option<(usize, usize)>) -> Option<String> {
+    counter.map(|(i, n)| format!("[{i}/{n}]"))
+}
+
+/// Label in front of every progress bar: `[2/5] flixel` or plain `flixel`.
+fn bar_prefix(haxelib: &Haxelib, counter: Option<(usize, usize)>) -> String {
+    match counter_tag(counter) {
+        Some(tag) => format!("{tag} {}", haxelib.name),
+        None => haxelib.name.clone(),
+    }
+}
+
+/// Bold `[2/5] ` for the lead line printed before a bar, empty otherwise (so
+/// single-library commands emit no stray style codes).
+fn counter_lead(counter: Option<(usize, usize)>) -> String {
+    counter_tag(counter)
+        .map(|tag| format!("{} ", tag.bold()))
+        .unwrap_or_default()
+}
+
+/// Common setup for every install bar: label, clear-on-drop (so an early `?`
+/// return leaves no stale bar row) and a spinner that keeps moving between
+/// updates. Hidden bars (no TTY, e.g. under the test runner) get no ticker
+/// thread.
+fn install_bar(pb: ProgressBar, style: ProgressStyle, prefix: &str) -> ProgressBar {
+    let pb = pb
+        .with_style(style)
+        .with_prefix(prefix.to_string())
+        .with_finish(ProgressFinish::AndClear);
+    if !pb.is_hidden() {
+        pb.enable_steady_tick(BAR_TICK);
+    }
+    pb
+}
+
+/// A bar for one git invocation; starts as a spinner and turns into a bar as
+/// soon as git reports a phase with a known total.
+fn git_bar(prefix: &str, msg: &str) -> ProgressBar {
+    install_bar(ProgressBar::no_length(), git_spinner_style(), prefix).with_message(msg.to_string())
+}
+
+/// One progress update parsed from `git --progress` output, e.g.
+/// `Receiving objects:  45% (1234/2742), 1.20 MiB | 3.40 MiB/s`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitProgress {
+    /// Phase name as git prints it (`Receiving objects`, `Resolving deltas`, …).
+    pub title: String,
+    pub current: u64,
+    /// `None` for the count-only form (`Enumerating objects: 1234`).
+    pub total: Option<u64>,
+    /// Whatever follows the counts, normally the throughput tail
+    /// (`, 1.20 MiB | 3.40 MiB/s`); empty when there is none.
+    pub detail: String,
+    /// The line carried git's `, done.` suffix.
+    pub done: bool,
+}
+
+/// Parses one `\r`/`\n`-delimited segment of git's stderr.
+///
+/// Accepts the two shapes git's `progress.c` prints, `Title: NN% (cur/total)`
+/// and `Title: cur`, each optionally followed by a throughput tail and
+/// `, done.`, with or without the `remote: ` sideband prefix and its padding.
+/// Anything else (`fatal: …`, `HEAD is now at …`, hints) is `None`.
+pub fn parse_git_progress(line: &str) -> Option<GitProgress> {
+    let line = line.trim();
+    let line = line.strip_prefix("remote: ").unwrap_or(line).trim();
+    let (title, rest) = line.split_once(": ")?;
+    if !is_progress_title(title) {
+        return None;
+    }
+    let (rest, done) = match rest.strip_suffix(", done.") {
+        Some(rest) => (rest, true),
+        None => (rest, false),
+    };
+    // git pads the percentage (`%3u%%`), so there may be extra spaces here.
+    let rest = rest.trim_start();
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 {
+        return None;
+    }
+    let (number, after) = rest.split_at(digits);
+
+    if let Some(counts) = after.strip_prefix("% (") {
+        let close = counts.find(')')?;
+        let (current, total) = counts[..close].split_once('/')?;
+        return Some(GitProgress {
+            title: title.to_string(),
+            current: current.parse().ok()?,
+            total: Some(total.parse().ok()?),
+            detail: counts[close + 1..].to_string(),
+            done,
+        });
+    }
+
+    if !after.is_empty() && !after.starts_with(", ") {
+        return None;
+    }
+    Some(GitProgress {
+        title: title.to_string(),
+        current: number.parse().ok()?,
+        total: None,
+        detail: after.to_string(),
+        done,
+    })
+}
+
+/// Progress titles are plain words (`Receiving objects`); this keeps
+/// `fatal: …`, `HEAD is now at 1a2b3c fix: …` and a bare sideband prefix from
+/// being taken for progress.
+fn is_progress_title(title: &str) -> bool {
+    !title.is_empty()
+        && title != "remote"
+        && title.bytes().all(|b| b.is_ascii_alphabetic() || b == b' ')
+}
+
+/// On a narrow terminal git prints the title alone (`Receiving objects:`) and
+/// the counters on the following lines; returns the title in that case.
+fn split_progress_title(line: &str) -> Option<&str> {
+    let line = line.strip_prefix("remote: ").unwrap_or(line);
+    let title = line.strip_suffix(':')?;
+    is_progress_title(title).then_some(title)
+}
+
+/// Exit status of a git invocation plus the stderr lines that were not
+/// progress updates (errors, hints, notes), for error reporting.
+struct GitRun {
+    status: ExitStatus,
+    stderr: Vec<String>,
+}
+
+impl GitRun {
+    /// Our message followed by git's own explanation, when it gave one.
+    fn error(&self, msg: impl std::fmt::Display) -> anyhow::Error {
+        if self.stderr.is_empty() {
+            anyhow!("{msg}")
+        } else {
+            anyhow!("{msg}\n{}", self.stderr.join("\n"))
+        }
+    }
+}
+
+/// Routes git's stderr into a progress bar: progress updates drive the bar,
+/// everything else is kept for error reporting. `warning:` lines are echoed
+/// right away (e.g. "filtering not recognized by server, ignoring").
+struct GitStderrSink<'a> {
+    pb: &'a ProgressBar,
+    lines: Vec<String>,
+    /// Title of a split progress line (`Receiving objects:` on its own row,
+    /// which git emits when the terminal is narrow) awaiting its counters.
+    pending_title: Option<String>,
+    bar_shown: bool,
+}
+
+impl<'a> GitStderrSink<'a> {
+    fn new(pb: &'a ProgressBar) -> Self {
+        Self {
+            pb,
+            lines: Vec::new(),
+            pending_title: None,
+            bar_shown: false,
+        }
+    }
+
+    fn push(&mut self, raw: &[u8]) {
+        let text = String::from_utf8_lossy(raw);
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+
+        let progress = parse_git_progress(text).or_else(|| {
+            let title = self.pending_title.as_deref()?;
+            parse_git_progress(&format!("{title}: {text}"))
+        });
+        if let Some(progress) = progress {
+            self.apply(&progress);
+            return;
+        }
+        if let Some(title) = split_progress_title(text) {
+            self.pending_title = Some(title.to_string());
+            return;
+        }
+        if text.starts_with("warning:") {
+            self.pb.suspend(|| eprintln!("{text}"));
+        }
+        self.lines.push(text.to_string());
+    }
+
+    fn apply(&mut self, progress: &GitProgress) {
+        match progress.total {
+            Some(total) => {
+                if !self.bar_shown {
+                    self.pb.set_style(git_bar_style());
+                    self.bar_shown = true;
+                }
+                if self.pb.length() != Some(total) {
+                    self.pb.set_length(total);
+                }
+                self.pb.set_position(progress.current);
+                let throughput = progress.detail.trim_start_matches(", ");
+                self.pb.set_message(if throughput.is_empty() {
+                    progress.title.clone()
+                } else {
+                    format!("{} ({throughput})", progress.title)
+                });
+            }
+            None => {
+                if self.bar_shown {
+                    self.pb.set_style(git_spinner_style());
+                    self.pb.unset_length();
+                    self.bar_shown = false;
+                }
+                self.pb.set_message(format!(
+                    "{}: {}{}",
+                    progress.title, progress.current, progress.detail
+                ));
+            }
+        }
+    }
+}
+
+/// Runs `git <args>` (which should include `--progress`) with stderr piped
+/// through `pb`. stdout is discarded so nothing interleaves with the bar;
+/// stdin stays inherited so credential and ssh prompts, which go through the
+/// tty, keep working.
+fn run_git_with_progress(args: &[&str], pb: &ProgressBar) -> Result<GitRun> {
+    let mut child = std::process::Command::new("git")
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let stderr = child.stderr.take().expect("stderr is piped");
+    let mut sink = GitStderrSink::new(pb);
+    let mut segment = Vec::new();
+    for byte in BufReader::new(stderr).bytes() {
+        match byte? {
+            b'\r' | b'\n' => {
+                sink.push(&segment);
+                segment.clear();
+            }
+            byte => segment.push(byte),
+        }
+    }
+    sink.push(&segment);
+
+    let status = child.wait()?;
+    Ok(GitRun {
+        status,
+        stderr: sink.lines,
+    })
+}
+
 /// User's choice for resolving git conflicts
 enum ConflictResolution {
     Stash,   // Stash changes, update, restore
@@ -54,21 +346,31 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -
 
     let filtered = deps.filter_by_names(libs);
     let installs_needed = compare_haxelib_to_hmm(&filtered, false)?;
+    // compare_haxelib_to_hmm reports every dep; only the ones needing work get
+    // a slot in the [n/N] counter.
+    let pending: Vec<&HaxelibStatus> = installs_needed
+        .iter()
+        .filter(|s| s.install_type != InstallType::AlreadyInstalled)
+        .collect();
+    let total = pending.len();
     println!(
         "{} dependencies need to be installed",
-        installs_needed.len().to_string().bold()
+        total.to_string().bold()
     );
 
     let mut failures: Vec<(String, anyhow::Error)> = Vec::new();
 
-    for install_status in installs_needed.iter() {
+    for (i, install_status) in pending.iter().enumerate() {
+        let counter = Some((i + 1, total));
         let result = match &install_status.install_type {
-            InstallType::Missing => handle_install(install_status, separator),
-            InstallType::MissingGit => handle_install(install_status, separator),
+            InstallType::Missing => handle_install(install_status, separator, counter),
+            InstallType::MissingGit => handle_install(install_status, separator, counter),
             InstallType::MissingDevLink => ensure_git_subdir_dev_link(install_status.lib),
             InstallType::Outdated => match &install_status.lib.haxelib_type {
-                HaxelibType::Haxelib => install_from_haxelib(install_status.lib),
-                HaxelibType::Git => install_or_update_git_cli(install_status.lib, separator),
+                HaxelibType::Haxelib => install_from_haxelib(install_status.lib, counter),
+                HaxelibType::Git => {
+                    install_or_update_git_cli(install_status.lib, separator, counter)
+                }
                 lib_type => {
                     println!(
                         "{}: Installing from {:?} not yet implemented",
@@ -80,7 +382,7 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -
             },
             InstallType::Conflict => {
                 // Handle git conflicts interactively
-                handle_git_conflict(install_status, separator)
+                handle_git_conflict(install_status, separator, counter)
             }
             InstallType::AlreadyInstalled => Ok(()), // do nothing on things already installed at the right version
             _ => {
@@ -108,7 +410,7 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -
         println!(
             "⚠ {} of {} dependencies failed to install:",
             failures.len().to_string().red().bold(),
-            installs_needed.len().to_string().bold()
+            total.to_string().bold()
         );
         for (name, err) in &failures {
             println!("  - {}: {:#}", name.red(), err);
@@ -124,10 +426,14 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -
     Ok(())
 }
 
-pub fn handle_install(haxelib_status: &HaxelibStatus, separator: &str) -> Result<()> {
+pub fn handle_install(
+    haxelib_status: &HaxelibStatus,
+    separator: &str,
+    counter: Option<(usize, usize)>,
+) -> Result<()> {
     match &haxelib_status.lib.haxelib_type {
-        HaxelibType::Haxelib => install_from_haxelib(haxelib_status.lib)?,
-        HaxelibType::Git => install_or_update_git_cli(haxelib_status.lib, separator)?,
+        HaxelibType::Haxelib => install_from_haxelib(haxelib_status.lib, counter)?,
+        HaxelibType::Git => install_or_update_git_cli(haxelib_status.lib, separator, counter)?,
         lib_type => println!(
             "{}: Installing from {:?} not yet implemented",
             haxelib_status.lib.name.red(),
@@ -139,9 +445,10 @@ pub fn handle_install(haxelib_status: &HaxelibStatus, separator: &str) -> Result
 }
 
 #[tokio::main]
-pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
+pub async fn install_from_haxelib(haxelib: &Haxelib, counter: Option<(usize, usize)>) -> Result<()> {
     println!(
-        "Downloading: {} - {} - {}",
+        "{}Downloading: {} - {} - {}",
+        counter_lead(counter),
         haxelib.name.bold(),
         "lib.haxe.org".yellow().bold(),
         haxelib.download_url()?.bold()
@@ -156,48 +463,47 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
         return Err(anyhow!("Failed to download: HTTP {}", response.status()));
     }
 
-    let expected_total_size = response
-        .content_length()
-        .ok_or_else(|| anyhow!("Server didn't provide content length"))?;
-
-    let pb: ProgressBar = ProgressBar::new(expected_total_size);
-    pb.set_style(ProgressStyle::with_template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.yellow/red}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-             .unwrap());
+    // No Content-Length (chunked transfer) only means no ETA: count bytes on a
+    // spinner instead of failing the install.
+    let expected_total_size = response.content_length();
+    let prefix = bar_prefix(haxelib, counter);
+    let pb = match expected_total_size {
+        Some(len) => install_bar(ProgressBar::new(len), download_bar_style(), &prefix),
+        None => install_bar(ProgressBar::no_length(), download_spinner_style(), &prefix),
+    };
 
     let tmp_dir = env::temp_dir().join(format!("{}.zip", haxelib.name));
 
-    let _ = {
+    {
         let mut file = File::create(&tmp_dir)?;
-        let mut downloaded: u64 = 0;
         let mut stream = response.bytes_stream();
 
         while let Some(item) = stream.next().await {
             let chunk = item?;
             file.write_all(&chunk)?;
-            let new = std::cmp::min(downloaded + (chunk.len() as u64), expected_total_size);
-            downloaded = new;
-            pb.set_position(new);
+            pb.inc(chunk.len() as u64);
         }
 
         file.flush()?;
-        downloaded
-    };
+    }
 
-    let finish_message = format!(
+    pb.finish_and_clear();
+    vprintln!(
         "{}: {} done downloading from {}",
         haxelib.name.green().bold(),
         haxelib.version()?.bright_green(),
         "Haxelib".yellow().bold()
     );
-    pb.finish_with_message(finish_message);
 
-    let metadata = std::fs::metadata(&tmp_dir)?;
-    if metadata.len() != expected_total_size {
-        return Err(anyhow!(
-            "Download incomplete: expected {} bytes, got {} bytes",
-            expected_total_size,
-            metadata.len()
-        ));
+    if let Some(expected_total_size) = expected_total_size {
+        let metadata = std::fs::metadata(&tmp_dir)?;
+        if metadata.len() != expected_total_size {
+            return Err(anyhow!(
+                "Download incomplete: expected {} bytes, got {} bytes",
+                expected_total_size,
+                metadata.len()
+            ));
+        }
     }
 
     let output_dir = haxelib.lib_dir_path();
@@ -241,7 +547,13 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
     };
 
     // Extract entries, stripping the base_path prefix
+    let extract_pb = install_bar(
+        ProgressBar::new(zip_file.len() as u64),
+        extract_bar_style(),
+        &prefix,
+    );
     for i in 0..zip_file.len() {
+        extract_pb.inc(1);
         let mut entry = zip_file.by_index(i)?;
 
         let Some(out_path) = sanitize_zip_entry(&base_path, entry.name(), &unzipped_output_dir)
@@ -259,6 +571,7 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
             io::copy(&mut entry, &mut outfile)?;
         }
     }
+    extract_pb.finish_and_clear();
 
     // Written only after extraction succeeds: a mid-extraction failure must not
     // leave a .current claiming a version whose directory is partial or absent
@@ -275,33 +588,43 @@ pub async fn install_from_haxelib(haxelib: &Haxelib) -> Result<()> {
 /// - Uses blobless clone (--filter=blob:none) for fast initial download with full history
 /// - Smart checkout: tries local first, fetches only if commit not found
 /// - Properly handles submodules with --init --recursive
-pub fn install_or_update_git_cli(haxelib: &Haxelib, separator: &str) -> Result<()> {
+pub fn install_or_update_git_cli(
+    haxelib: &Haxelib,
+    separator: &str,
+    counter: Option<(usize, usize)>,
+) -> Result<()> {
     let git_dir_path = haxelib.git_repo_path();
     let parent_dir = haxelib.lib_dir_path();
+    let prefix = bar_prefix(haxelib, counter);
 
     // Ensure repository exists (clone if needed)
     if !git_dir_path.exists() {
         println!(
-            "Cloning {} (blobless for speed + full history)...",
+            "{}Cloning {} (blobless for speed + full history)...",
+            counter_lead(counter),
             haxelib.name
         );
-        clone_blobless_git_repo(haxelib, &git_dir_path, separator)?;
+        clone_blobless_git_repo(haxelib, &git_dir_path, separator, &prefix)?;
 
         // Create .current file indicating this is a git install
         create_current_file(&parent_dir, &String::from("git"))?;
     } else {
-        println!("Repository exists, checking out {}...", haxelib.name);
+        println!(
+            "{}Repository exists, checking out {}...",
+            counter_lead(counter),
+            haxelib.name
+        );
     }
 
     // Checkout the specified commit/ref (if provided)
     if haxelib.vcs_ref.is_some() {
-        smart_checkout_git_ref(haxelib, &git_dir_path, separator)?;
+        smart_checkout_git_ref(haxelib, &git_dir_path, separator, &prefix)?;
     } else {
-        println!("No ref specified, using repository's default branch");
+        vprintln!("No ref specified, using repository's default branch");
     }
 
     // Update submodules to match the checked out commit
-    update_git_submodules(&git_dir_path)?;
+    update_git_submodules(&git_dir_path, &prefix)?;
 
     // If a subdirectory is configured, point a `.dev` marker into it.
     ensure_git_subdir_dev_link(haxelib)?;
@@ -312,35 +635,42 @@ pub fn install_or_update_git_cli(haxelib: &Haxelib, separator: &str) -> Result<(
 
 /// Clone with --filter=blob:none for fast download with full commit history
 /// Falls back to regular clone if blobless is not supported
-fn clone_blobless_git_repo(haxelib: &Haxelib, target_path: &Path, separator: &str) -> Result<()> {
+fn clone_blobless_git_repo(
+    haxelib: &Haxelib,
+    target_path: &Path,
+    separator: &str,
+    prefix: &str,
+) -> Result<()> {
     let url = haxelib.url()?;
+    let target = path_to_str(target_path)?;
 
     // Try blobless clone first (fast, full history)
-    let blobless_result = std::process::Command::new("git")
-        .args([
-            "clone",
-            "--filter=blob:none",
-            url,
-            path_to_str(target_path)?,
-        ])
-        .status()
-        .context("Failed to execute git clone")?;
+    let pb = git_bar(prefix, "cloning (blobless)");
+    let blobless_result = run_git_with_progress(
+        &["clone", "--progress", "--filter=blob:none", url, target],
+        &pb,
+    )
+    .context("Failed to execute git clone")?;
+    pb.finish_and_clear();
 
-    if blobless_result.success() {
-        println!("✓ Blobless clone completed");
+    if blobless_result.status.success() {
+        vprintln!("✓ Blobless clone completed");
     } else {
         // Fallback to regular clone if blobless not supported
         println!("Blobless clone failed, falling back to regular clone...");
-        let regular_result = std::process::Command::new("git")
-            .args(["clone", url, path_to_str(target_path)?])
-            .status()
+        for line in &blobless_result.stderr {
+            vprintln!("  {}", line.bright_black());
+        }
+        let pb = git_bar(prefix, "cloning");
+        let regular_result = run_git_with_progress(&["clone", "--progress", url, target], &pb)
             .context("Failed to execute git clone")?;
+        pb.finish_and_clear();
 
-        if !regular_result.success() {
-            return Err(anyhow!("Git clone failed for {}", haxelib.name));
+        if !regular_result.status.success() {
+            return Err(regular_result.error(format!("Git clone failed for {}", haxelib.name)));
         }
 
-        println!("✓ Clone completed");
+        vprintln!("✓ Clone completed");
     }
 
     // Parse remote name from URL and rename origin
@@ -351,98 +681,107 @@ fn clone_blobless_git_repo(haxelib: &Haxelib, target_path: &Path, separator: &st
 }
 
 /// Smart checkout: try local first, fetch if commit not found
-fn smart_checkout_git_ref(haxelib: &Haxelib, repo_path: &Path, separator: &str) -> Result<()> {
+fn smart_checkout_git_ref(
+    haxelib: &Haxelib,
+    repo_path: &Path,
+    separator: &str,
+    prefix: &str,
+) -> Result<()> {
     let target_ref = haxelib.vcs_ref()?;
     let url = haxelib.url()?;
+    let repo = path_to_str(repo_path)?;
 
-    println!("Checking out {} at {}...", haxelib.name, target_ref);
+    vprintln!("Checking out {} at {}...", haxelib.name, target_ref);
 
     // Ensure remote exists with correct name and URL
     let remote_name = parse_remote_name_from_url(url, separator)?;
     ensure_git_remote(repo_path, &remote_name, url)?;
 
-    // Try to checkout locally first
-    let checkout_result = std::process::Command::new("git")
-        .args(["-C", path_to_str(repo_path)?, "checkout", target_ref])
-        .output()
-        .context("Failed to execute git checkout")?;
+    // Try to checkout locally first. In a blobless clone this is also where
+    // the file contents get downloaded, silently: git's lazy blob fetch never
+    // reports progress to a pipe, so the spinner is what shows the wait.
+    let pb = git_bar(prefix, &format!("checking out {target_ref}"));
+    let checkout_result =
+        run_git_with_progress(&["-C", repo, "checkout", "--progress", target_ref], &pb)
+            .context("Failed to execute git checkout")?;
+    pb.finish_and_clear();
 
     if checkout_result.status.success() {
-        println!("✓ Checked out {} (local)", target_ref);
+        vprintln!("✓ Checked out {} (local)", target_ref);
         return Ok(());
     }
 
     // Commit not found locally - fetch from managed remote and retry
-    println!(
+    vprintln!(
         "Commit {} not found locally, fetching from {}...",
         target_ref, remote_name
     );
 
-    let fetch_result = std::process::Command::new("git")
-        .args(["-C", path_to_str(repo_path)?, "fetch", &remote_name])
-        .status()
+    let pb = git_bar(prefix, &format!("fetching from {remote_name}"));
+    let fetch_result = run_git_with_progress(&["-C", repo, "fetch", "--progress", &remote_name], &pb)
         .context("Failed to execute git fetch")?;
+    pb.finish_and_clear();
 
-    if !fetch_result.success() {
-        println!(
+    if !fetch_result.status.success() {
+        vprintln!(
             "Standard fetch failed, retrying with {} (skips negotiation)...",
             "--refetch".cyan()
         );
 
-        let refetch_result = std::process::Command::new("git")
-            .args([
-                "-C",
-                path_to_str(repo_path)?,
-                "fetch",
-                "--refetch",
-                &remote_name,
-            ])
-            .status()
-            .context("Failed to execute git fetch --refetch")?;
+        let pb = git_bar(prefix, &format!("refetching from {remote_name}"));
+        let refetch_result = run_git_with_progress(
+            &["-C", repo, "fetch", "--progress", "--refetch", &remote_name],
+            &pb,
+        )
+        .context("Failed to execute git fetch --refetch")?;
+        pb.finish_and_clear();
 
-        if !refetch_result.success() {
-            return Err(anyhow!(
+        if !refetch_result.status.success() {
+            return Err(refetch_result.error(format!(
                 "Git fetch failed for {} from {} (tried both standard and --refetch)",
-                haxelib.name,
-                remote_name
-            ));
+                haxelib.name, remote_name
+            )));
         }
     }
 
     // Try checkout again after fetch
-    let checkout_retry = std::process::Command::new("git")
-        .args(["-C", path_to_str(repo_path)?, "checkout", target_ref])
-        .status()
-        .context("Failed to execute git checkout after fetch")?;
+    let pb = git_bar(prefix, &format!("checking out {target_ref}"));
+    let checkout_retry =
+        run_git_with_progress(&["-C", repo, "checkout", "--progress", target_ref], &pb)
+            .context("Failed to execute git checkout after fetch")?;
+    pb.finish_and_clear();
 
-    if !checkout_retry.success() {
-        return Err(anyhow!(
+    if !checkout_retry.status.success() {
+        return Err(checkout_retry.error(format!(
             "Commit {} not found even after fetch for {}",
-            target_ref,
-            haxelib.name
-        ));
+            target_ref, haxelib.name
+        )));
     }
 
-    println!("✓ Checked out {} (after fetch)", target_ref);
+    vprintln!("✓ Checked out {} (after fetch)", target_ref);
     Ok(())
 }
 
 /// Initialize and update submodules recursively
-fn update_git_submodules(repo_path: &Path) -> Result<()> {
-    let result = std::process::Command::new("git")
-        .args([
+fn update_git_submodules(repo_path: &Path, prefix: &str) -> Result<()> {
+    let pb = git_bar(prefix, "updating submodules");
+    let result = run_git_with_progress(
+        &[
             "-C",
             path_to_str(repo_path)?,
             "submodule",
             "update",
             "--init",
             "--recursive",
-        ])
-        .status()
-        .context("Failed to execute git submodule update")?;
+            "--progress",
+        ],
+        &pb,
+    )
+    .context("Failed to execute git submodule update")?;
+    pb.finish_and_clear();
 
-    if !result.success() {
-        return Err(anyhow!("Git submodule update failed"));
+    if !result.status.success() {
+        return Err(result.error("Git submodule update failed"));
     }
 
     Ok(())
@@ -630,7 +969,7 @@ fn ensure_git_remote(repo_path: &Path, remote_name: &str, url: &str) -> Result<(
             .to_string();
 
         if existing_url != url {
-            println!("Updating remote {} URL...", remote_name.cyan());
+            vprintln!("Updating remote {} URL...", remote_name.cyan());
 
             let update_result = std::process::Command::new("git")
                 .args([
@@ -650,7 +989,7 @@ fn ensure_git_remote(repo_path: &Path, remote_name: &str, url: &str) -> Result<(
         }
     } else {
         // Remote doesn't exist - create it
-        println!("Adding remote {}...", remote_name.cyan());
+        vprintln!("Adding remote {}...", remote_name.cyan());
 
         let add_result = std::process::Command::new("git")
             .args([
@@ -691,7 +1030,7 @@ fn rename_origin_remote(repo_path: &Path, new_name: &str) -> Result<()> {
         .context("Failed to check origin remote")?;
 
     if check_origin.status.success() {
-        println!("Renaming remote origin → {}...", new_name.cyan());
+        vprintln!("Renaming remote origin → {}...", new_name.cyan());
 
         let rename_result = std::process::Command::new("git")
             .args([
@@ -716,7 +1055,11 @@ fn rename_origin_remote(repo_path: &Path, new_name: &str) -> Result<()> {
 }
 
 /// Handle a git conflict by prompting user and executing their choice
-fn handle_git_conflict(haxelib_status: &HaxelibStatus, separator: &str) -> Result<()> {
+fn handle_git_conflict(
+    haxelib_status: &HaxelibStatus,
+    separator: &str,
+    counter: Option<(usize, usize)>,
+) -> Result<()> {
     let haxelib = haxelib_status.lib;
     let repo_path = haxelib.git_repo_path();
 
@@ -726,16 +1069,16 @@ fn handle_git_conflict(haxelib_status: &HaxelibStatus, separator: &str) -> Resul
     match choice {
         ConflictResolution::Stash => {
             git_stash_push(&repo_path, haxelib)?;
-            install_or_update_git_cli(haxelib, separator)?;
+            install_or_update_git_cli(haxelib, separator, counter)?;
             git_stash_pop(&repo_path, haxelib)?;
         }
         ConflictResolution::Discard => {
             git_discard_changes(&repo_path, haxelib)?;
-            install_or_update_git_cli(haxelib, separator)?;
+            install_or_update_git_cli(haxelib, separator, counter)?;
         }
         ConflictResolution::Commit => {
             git_commit_changes(&repo_path, haxelib)?;
-            install_or_update_git_cli(haxelib, separator)?;
+            install_or_update_git_cli(haxelib, separator, counter)?;
         }
         ConflictResolution::Skip => {
             println!("Skipping {}", haxelib.name.yellow());
@@ -1130,6 +1473,123 @@ mod tests {
             sanitize_zip_entry("", "foo..bar.txt", &dest()),
             Some(dest().join("foo..bar.txt"))
         );
+    }
+
+    // --- parse_git_progress / run_git_with_progress ---
+
+    #[test]
+    fn git_progress_parses_percent_form_with_throughput() {
+        let p = parse_git_progress("Receiving objects:  45% (1234/2742), 1.20 MiB | 3.40 MiB/s")
+            .unwrap();
+        assert_eq!(
+            p,
+            GitProgress {
+                title: "Receiving objects".into(),
+                current: 1234,
+                total: Some(2742),
+                detail: ", 1.20 MiB | 3.40 MiB/s".into(),
+                done: false,
+            }
+        );
+    }
+
+    #[test]
+    fn git_progress_strips_sideband_prefix_and_padding() {
+        let p = parse_git_progress("remote: Compressing objects: 100% (500/500), done.        ")
+            .unwrap();
+        assert_eq!(p.title, "Compressing objects");
+        assert_eq!((p.current, p.total), (500, Some(500)));
+        assert_eq!(p.detail, "");
+        assert!(p.done);
+    }
+
+    #[test]
+    fn git_progress_parses_count_only_form() {
+        let p = parse_git_progress("remote: Enumerating objects: 1234, done.").unwrap();
+        assert_eq!(p.title, "Enumerating objects");
+        assert_eq!((p.current, p.total), (1234, None));
+        assert!(p.done);
+    }
+
+    #[test]
+    fn git_progress_accepts_every_phase_title() {
+        for title in [
+            "Counting objects",
+            "Compressing objects",
+            "Receiving objects",
+            "Resolving deltas",
+            "Updating files",
+        ] {
+            let p = parse_git_progress(&format!("{title}:   0% (0/10)")).unwrap();
+            assert_eq!(p.title, title);
+            assert!(!p.done);
+        }
+    }
+
+    #[test]
+    fn git_progress_rejects_non_progress_lines() {
+        for line in [
+            "",
+            "Cloning into '/tmp/x'...",
+            "fatal: bad object deadbeef",
+            "HEAD is now at 1a2b3c fix: 12% (1/2)",
+            "Submodule path 'lib': checked out 'abc'",
+            "remote: Total 12 (delta 0), reused 0 (delta 0)",
+            "remote: 5",
+            "Receiving objects: abc",
+            "Receiving objects: 45% (1234/)",
+            "Receiving objects: 45 objects",
+            "warning: filtering not recognized by server, ignoring",
+        ] {
+            assert!(parse_git_progress(line).is_none(), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn git_stderr_sink_drives_bar_and_keeps_other_lines() {
+        let pb = ProgressBar::hidden();
+        let mut sink = GitStderrSink::new(&pb);
+        sink.push(b"Cloning into '/tmp/x'...");
+        sink.push(b"remote: Enumerating objects: 30, done.        ");
+        assert_eq!(pb.message(), "Enumerating objects: 30");
+        sink.push(b"Receiving objects:  50% (10/20), 1.00 MiB | 2.00 MiB/s");
+        assert_eq!(pb.position(), 10);
+        assert_eq!(pb.length(), Some(20));
+        assert_eq!(pb.message(), "Receiving objects (1.00 MiB | 2.00 MiB/s)");
+        // Narrow-terminal split form: the title alone, then indented counters.
+        sink.push(b"Resolving deltas:");
+        sink.push(b"  75% (3/4)");
+        assert_eq!(pb.position(), 3);
+        assert_eq!(pb.length(), Some(4));
+        assert_eq!(pb.message(), "Resolving deltas");
+        sink.push(b"fatal: early EOF");
+        assert_eq!(sink.lines, vec!["Cloning into '/tmp/x'...", "fatal: early EOF"]);
+    }
+
+    #[test]
+    fn run_git_with_progress_collects_stderr_on_failure() {
+        let missing = tempfile::TempDir::new().unwrap().path().join("nope");
+        let pb = ProgressBar::hidden();
+        let run =
+            run_git_with_progress(&["-C", missing.to_str().unwrap(), "status"], &pb).unwrap();
+        assert!(!run.status.success());
+        assert!(
+            run.stderr.iter().any(|l| l.starts_with("fatal:")),
+            "{:?}",
+            run.stderr
+        );
+        let err = run.error("boom").to_string();
+        assert!(err.starts_with("boom\n"), "{err:?}");
+        assert!(err.contains("fatal:"), "{err:?}");
+    }
+
+    #[test]
+    fn run_git_with_progress_success_is_quiet() {
+        let pb = ProgressBar::hidden();
+        let run = run_git_with_progress(&["--version"], &pb).unwrap();
+        assert!(run.status.success());
+        assert!(run.stderr.is_empty(), "{:?}", run.stderr);
+        assert_eq!(run.error("boom").to_string(), "boom");
     }
 
     #[test]
