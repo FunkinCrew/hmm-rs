@@ -605,9 +605,6 @@ pub fn install_or_update_git_cli(
             haxelib.name
         );
         clone_blobless_git_repo(haxelib, &git_dir_path, separator, &prefix)?;
-
-        // Create .current file indicating this is a git install
-        create_current_file(&parent_dir, &String::from("git"))?;
     } else {
         println!(
             "{}Repository exists, checking out {}...",
@@ -615,6 +612,11 @@ pub fn install_or_update_git_cli(
             haxelib.name
         );
     }
+
+    // Written on every git install, not just a fresh clone: git/ can already
+    // exist from before the lib was switched to a haxelib version, leaving
+    // .current pointing at that version dir instead of git/.
+    create_current_file(&parent_dir, &String::from("git"))?;
 
     // Checkout the specified commit/ref (if provided)
     if haxelib.vcs_ref.is_some() {

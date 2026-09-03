@@ -304,6 +304,25 @@ fn check_git_detects_missing_clone() {
         .stdout(predicate::str::contains("is not cloned / installed (via git)"));
 }
 
+/// Regression: the git/ checkout is at the right commit, but `.current`
+/// still names a haxelib version (left behind by a haxelib install of the
+/// same lib before it was switched back to git). `haxelib path` follows
+/// `.current`, so this must not pass as installed.
+#[test]
+fn check_git_detects_stale_current() {
+    let (_repo, temp, _first_sha) = installed_git_project();
+    std::fs::write(temp.path().join(".haxelib/gitlib/.current"), "1.0.0").unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("is not at the correct version"))
+        .stdout(predicate::str::contains("1.0.0"));
+}
+
 #[test]
 fn check_unknown_lib_warns() {
     let json = r#"{

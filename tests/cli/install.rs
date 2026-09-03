@@ -475,3 +475,52 @@ fn install_haxelib_narration_only_with_verbose() {
         .success()
         .stdout(predicate::str::contains("done downloading"));
 }
+
+/// Regression: a lib that went git -> haxelib -> git kept the haxelib version
+/// in `.current`. Installing the haxelib version leaves git/ in place, `check`
+/// only inspected the checkout, and the git installer only wrote `.current`
+/// on a fresh clone.
+#[test]
+fn install_rewrites_current_when_switching_back_to_git() {
+    let stub = common::RegistryStub::serve(&[("switch-a", "1.0.0")]);
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let git_json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "switch-a", "type": "git", "ref": "main", "url": "{}"}}
+        ]
+    }}"#,
+        common::file_url(&repo_path)
+    );
+    let haxelib_json = r#"{
+        "dependencies": [
+            {"name": "switch-a", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(&git_json);
+    let current_path = temp.child(".haxelib/switch-a/.current");
+    let install = || {
+        let mut cmd = Command::cargo_bin("hmm-rs").unwrap();
+        cmd.current_dir(temp.path())
+            .env("HMM_HAXELIB_URL", &stub.base_url)
+            .arg("install");
+        cmd
+    };
+
+    install().assert().success();
+    assert_eq!(std::fs::read_to_string(current_path.path()).unwrap(), "git");
+
+    std::fs::write(temp.child("hmm.json").path(), haxelib_json).unwrap();
+    install().assert().success();
+    assert_eq!(std::fs::read_to_string(current_path.path()).unwrap(), "1.0.0");
+    temp.child(".haxelib/switch-a/git")
+        .assert(predicate::path::is_dir());
+
+    std::fs::write(temp.child("hmm.json").path(), &git_json).unwrap();
+    install()
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("is not at the correct version"))
+        .stdout(predicate::str::contains("Repository exists, checking out"));
+    assert_eq!(std::fs::read_to_string(current_path.path()).unwrap(), "git");
+}

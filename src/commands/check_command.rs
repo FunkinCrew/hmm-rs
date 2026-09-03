@@ -232,6 +232,26 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
                 }
             }
 
+            // The checkout can be right while `.current` still names a haxelib
+            // version dir (left behind when the lib was switched back to git
+            // over an existing git/ checkout). `haxelib path` follows
+            // `.current`, so it must select git/.
+            let current = std::fs::read_to_string(lib_path.join(".current"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+            if current != "git" {
+                return Ok(HaxelibStatus::new(
+                    haxelib,
+                    InstallType::Outdated,
+                    get_wants(haxelib),
+                    Some(if current.is_empty() {
+                        "none (.current missing)".to_string()
+                    } else {
+                        current
+                    }),
+                ));
+            }
+
             // we have a correct version, so we're going to update the current_version to the vcs_ref
             current_version = vcs_ref.to_string();
 
