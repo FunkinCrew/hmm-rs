@@ -13,7 +13,7 @@ pub fn lock_dependencies(
     deps: &Dependancies,
     libs: &[String],
     json_path: PathBuf,
-    long_id: bool,
+    short_id: bool,
 ) -> Result<()> {
     let mut updated_deps = deps.clone();
 
@@ -32,7 +32,7 @@ pub fn lock_dependencies(
             continue;
         }
 
-        match lock_dependency(lib, long_id) {
+        match lock_dependency(lib, short_id) {
             Ok(LockResult::Locked(version)) => {
                 println!(
                     "{} {} locked to {}",
@@ -96,10 +96,10 @@ enum LockResult {
     AlreadyLocked(String),
 }
 
-fn lock_dependency(lib: &mut Haxelib, long_id: bool) -> Result<LockResult> {
+fn lock_dependency(lib: &mut Haxelib, short_id: bool) -> Result<LockResult> {
     match lib.haxelib_type {
         HaxelibType::Haxelib => lock_haxelib_dependency(lib),
-        HaxelibType::Git => lock_git_dependency(lib, long_id),
+        HaxelibType::Git => lock_git_dependency(lib, short_id),
         HaxelibType::Dev => Ok(LockResult::Skipped(
             "dev dependencies are already locked by path".to_string(),
         )),
@@ -136,7 +136,7 @@ fn lock_haxelib_dependency(lib: &mut Haxelib) -> Result<LockResult> {
     Ok(LockResult::Locked(current_version))
 }
 
-fn lock_git_dependency(lib: &mut Haxelib, long_id: bool) -> Result<LockResult> {
+fn lock_git_dependency(lib: &mut Haxelib, short_id: bool) -> Result<LockResult> {
     let git_path = lib.git_repo_path();
 
     if !git_path.exists() {
@@ -148,11 +148,11 @@ fn lock_git_dependency(lib: &mut Haxelib, long_id: bool) -> Result<LockResult> {
     let repo = gix::discover(&git_path)?;
     let head_commit = repo.head_commit()?;
 
-    // Use full or short commit ID based on flag
-    let commit_sha = if long_id {
-        head_commit.id().to_string()
-    } else {
+    // Full commit ID by default; --short-id opts into the abbreviated form
+    let commit_sha = if short_id {
         head_commit.id().shorten_or_id().to_string()
+    } else {
+        head_commit.id().to_string()
     };
 
     // Check if already locked to this exact commit

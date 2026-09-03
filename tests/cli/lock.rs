@@ -139,7 +139,7 @@ fn read_locked_ref(temp: &assert_fs::TempDir) -> String {
 }
 
 #[test]
-fn lock_git_writes_short_commit_sha() {
+fn lock_git_writes_full_sha() {
     let (_repo, temp, head_sha) = installed_git_project();
 
     Command::cargo_bin("hmm-rs")
@@ -150,27 +150,82 @@ fn lock_git_writes_short_commit_sha() {
         .success()
         .stdout(predicate::str::contains("locked to"));
 
-    let locked = read_locked_ref(&temp);
+    assert_eq!(read_locked_ref(&temp), head_sha);
+}
+
+/// Asserts the locked ref is a strict, non-empty prefix of the full HEAD SHA.
+fn assert_short_sha(locked: &str, head_sha: &str) {
     assert_ne!(locked, "main");
     assert!(
-        head_sha.starts_with(&locked) && locked.len() < head_sha.len(),
+        !locked.is_empty() && head_sha.starts_with(locked) && locked.len() < head_sha.len(),
         "expected a shortened prefix of {head_sha}, got {locked}"
     );
 }
 
 #[test]
-fn lock_git_long_id_writes_full_sha() {
+fn lock_git_short_id_writes_short_sha() {
     let (_repo, temp, head_sha) = installed_git_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["lock", "--short-id"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("locked to"));
+
+    assert_short_sha(&read_locked_ref(&temp), &head_sha);
+}
+
+#[test]
+fn lock_git_short_id_alias() {
+    let (_repo, temp, head_sha) = installed_git_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["lock", "-s"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("locked to"));
+
+    assert_short_sha(&read_locked_ref(&temp), &head_sha);
+}
+
+/// A project locked to a short SHA by an older `lock` is upgraded to the full SHA.
+#[test]
+fn lock_git_upgrades_short_sha_to_full() {
+    let (_repo, temp, head_sha) = installed_git_project();
+
+    let json_path = temp.child("hmm.json");
+    let short_locked = std::fs::read_to_string(json_path.path())
+        .unwrap()
+        .replace("\"ref\": \"main\"", &format!("\"ref\": \"{}\"", &head_sha[..7]));
+    std::fs::write(json_path.path(), short_locked).unwrap();
+    assert_eq!(read_locked_ref(&temp), head_sha[..7]);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("lock")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("locked to"));
+
+    assert_eq!(read_locked_ref(&temp), head_sha);
+}
+
+#[test]
+fn lock_rejects_removed_long_id_flag() {
+    let temp = common::project_with_empty_hmm_json();
 
     Command::cargo_bin("hmm-rs")
         .unwrap()
         .current_dir(temp.path())
         .args(["lock", "--long-id"])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("locked to"));
-
-    assert_eq!(read_locked_ref(&temp), head_sha);
+        .failure()
+        .stderr(predicate::str::contains("unexpected argument"));
 }
 
 #[test]

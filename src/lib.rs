@@ -122,9 +122,9 @@ enum Commands {
         #[command(subcommand)]
         subcommand: Option<LockCommands>,
 
-        /// Use full commit IDs instead of shortened ones for git repositories
-        #[arg(short = 'l', long = "long-id")]
-        long_id: bool,
+        /// Use shortened commit IDs instead of full ones for git repositories
+        #[arg(short = 's', long = "short-id")]
+        short_id: bool,
 
         #[command(flatten)]
         filter: LibraryFilter,
@@ -238,7 +238,7 @@ pub fn run() -> Result<()> {
         )?,
         Commands::Lock {
             subcommand,
-            long_id,
+            short_id,
             filter,
         } => match subcommand {
             Some(LockCommands::Check) => commands::lock_command::check_locked(&load_deps()?)?,
@@ -246,7 +246,7 @@ pub fn run() -> Result<()> {
                 &load_deps()?,
                 &filter.lib,
                 args.global_opts.json.unwrap(),
-                long_id,
+                short_id,
             )?,
         },
     }
