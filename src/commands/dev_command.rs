@@ -26,6 +26,16 @@ pub fn write_dev_file(name: &str, absolute_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Removes the `.dev` marker for library `name`, if one exists.
+/// Returns whether a marker was removed.
+pub fn remove_dev_file(name: &str) -> Result<bool> {
+    match fs::remove_file(lib_dir_path_for_name(name).join(".dev")) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub fn add_dev_dependency(name: &str, path: &str, json_path: PathBuf) -> Result<()> {
     hmm::haxelib::validate_lib_name(name)?;
 
@@ -91,5 +101,23 @@ mod tests {
         result.unwrap();
 
         assert!(temp.path().join(".haxelib/funkin,vis/.dev").is_file());
+    }
+
+    #[test]
+    fn remove_dev_file_removes_marker_and_reports_absence() {
+        let _guard = CWD_LOCK.lock().unwrap();
+        let temp = assert_fs::TempDir::new().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        let written = write_dev_file("mylib", &temp.path().join("src"));
+        let first = remove_dev_file("mylib");
+        let second = remove_dev_file("mylib");
+
+        std::env::set_current_dir(&original).unwrap();
+        written.unwrap();
+        assert!(first.unwrap());
+        assert!(!second.unwrap());
+        assert!(!temp.path().join(".haxelib/mylib/.dev").exists());
     }
 }

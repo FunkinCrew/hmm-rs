@@ -365,7 +365,9 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -
         let result = match &install_status.install_type {
             InstallType::Missing => handle_install(install_status, separator, counter),
             InstallType::MissingGit => handle_install(install_status, separator, counter),
-            InstallType::MissingDevLink => ensure_git_subdir_dev_link(install_status.lib),
+            InstallType::MissingDevLink | InstallType::StaleDevLink => {
+                ensure_git_subdir_dev_link(install_status.lib)
+            }
             InstallType::Outdated => match &install_status.lib.haxelib_type {
                 HaxelibType::Haxelib => install_from_haxelib(install_status.lib, counter),
                 HaxelibType::Git => {
@@ -577,6 +579,16 @@ pub async fn install_from_haxelib(haxelib: &Haxelib, counter: Option<(usize, usi
     // leave a .current claiming a version whose directory is partial or absent
     // (`check` never inspects the version dir).
     create_current_file(&output_dir, &haxelib.version()?.to_string())?;
+
+    // hmm.json pins a haxelib version now, so a `.dev` marker left over from
+    // when this lib was a git dep with a `dir` must go: `haxelib path`
+    // prefers `.dev` over `.current`.
+    if crate::commands::dev_command::remove_dev_file(&haxelib.name)? {
+        println!(
+            "{}: development directory unset",
+            haxelib.name.green().bold()
+        );
+    }
 
     std::fs::remove_file(&tmp_dir)?;
 
@@ -1370,7 +1382,18 @@ pub fn create_current_file(path: &Path, content: &String) -> Result<()> {
 pub fn ensure_git_subdir_dev_link(haxelib: &Haxelib) -> Result<()> {
     let subdir = match haxelib.dir.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         Some(d) => d,
-        None => return Ok(()), // no subdir: nothing to do
+        None => {
+            // No subdir now, but one may have been set before (or this lib
+            // was a dev dep): a stale `.dev` would keep `haxelib path` away
+            // from git/.
+            if crate::commands::dev_command::remove_dev_file(&haxelib.name)? {
+                println!(
+                    "{}: development directory unset",
+                    haxelib.name.green().bold()
+                );
+            }
+            return Ok(());
+        }
     };
 
     let abs_git = std::fs::canonicalize(haxelib.git_repo_path())

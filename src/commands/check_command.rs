@@ -21,6 +21,7 @@ pub enum InstallType {
     Missing,          // Needs to be installed
     MissingGit,       // Needs to be cloned
     MissingDevLink,   // Git repo present at correct commit, but subdir `.dev` link is missing
+    StaleDevLink,     // Git repo present at correct commit, but a `.dev` link exists with no subdir configured
     Outdated,         // Installed but wrong version
     AlreadyInstalled, // Correctly installed
     Conflict,         // Version conflicts between dependencies
@@ -263,10 +264,21 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
                 .as_deref()
                 .map(str::trim)
                 .is_some_and(|d| !d.is_empty());
-            if has_subdir && !lib_path.join(".dev").exists() {
+            let has_dev_link = lib_path.join(".dev").exists();
+            if has_subdir && !has_dev_link {
                 return Ok(HaxelibStatus::new(
                     haxelib,
                     InstallType::MissingDevLink,
+                    get_wants(haxelib),
+                    None,
+                ));
+            }
+            // The reverse: `dir` was dropped (or the lib used to be a dev dep) but
+            // the `.dev` link remains, so `haxelib path` resolves away from git/.
+            if !has_subdir && has_dev_link {
+                return Ok(HaxelibStatus::new(
+                    haxelib,
+                    InstallType::StaleDevLink,
                     get_wants(haxelib),
                     None,
                 ));
@@ -318,6 +330,13 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
                     haxelib_status.lib.dir.as_deref().unwrap_or("")
                 )
                 .yellow()
+            );
+        }
+        InstallType::StaleDevLink => {
+            println!(
+                "{} {}",
+                haxelib_status.lib.name.yellow().bold(),
+                "has a stale dev link but no subdir configured".yellow()
             );
         }
         InstallType::Outdated => {

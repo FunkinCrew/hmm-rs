@@ -323,6 +323,23 @@ fn check_git_detects_stale_current() {
         .stdout(predicate::str::contains("1.0.0"));
 }
 
+/// Regression: a git dep with no `dir` but a leftover `.dev` (from an earlier
+/// subdir install or a dev dep) must not pass as installed, since
+/// `haxelib path` prefers `.dev` over the git/ checkout.
+#[test]
+fn check_git_detects_stale_dev_link() {
+    let (_repo, temp, _first_sha) = installed_git_project();
+    std::fs::write(temp.path().join(".haxelib/gitlib/.dev"), "/somewhere/else").unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("has a stale dev link"));
+}
+
 #[test]
 fn check_unknown_lib_warns() {
     let json = r#"{

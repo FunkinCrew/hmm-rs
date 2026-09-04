@@ -524,3 +524,103 @@ fn install_rewrites_current_when_switching_back_to_git() {
         .stdout(predicate::str::contains("Repository exists, checking out"));
     assert_eq!(std::fs::read_to_string(current_path.path()).unwrap(), "git");
 }
+
+/// Regression: switching a git dep that had a `dir` to a haxelib version
+/// left its `.dev` marker behind, so `haxelib path` (and `check`) kept
+/// resolving into the git subdir.
+#[test]
+fn install_haxelib_over_git_subdir_dep_clears_dev_link() {
+    let stub = common::RegistryStub::serve(&[("switch-b", "1.0.0")]);
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let git_json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "switch-b", "type": "git", "ref": "main", "url": "{}", "dir": "mylib"}}
+        ]
+    }}"#,
+        common::file_url(&repo_path)
+    );
+    let haxelib_json = r#"{
+        "dependencies": [
+            {"name": "switch-b", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(&git_json);
+    let dev_file = temp.child(".haxelib/switch-b/.dev");
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success();
+    dev_file.assert(predicate::path::is_file());
+
+    std::fs::write(temp.child("hmm.json").path(), haxelib_json).unwrap();
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("development directory unset"));
+    dev_file.assert(predicate::path::missing());
+    assert_eq!(
+        std::fs::read_to_string(temp.child(".haxelib/switch-b/.current").path()).unwrap(),
+        "1.0.0"
+    );
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "dependencie(s) are installed at the correct versions",
+        ))
+        .stdout(predicate::str::contains("is not at the correct version").not());
+}
+
+/// Regression: dropping `dir` from a git dep left the `.dev` marker from the
+/// earlier subdir install, so `haxelib path` still resolved into the subdir.
+#[test]
+fn install_git_dep_dropping_dir_clears_dev_link() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let url = common::file_url(&repo_path);
+    let with_dir = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "switch-c", "type": "git", "ref": "main", "url": "{url}", "dir": "mylib"}}
+        ]
+    }}"#
+    );
+    let without_dir = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "switch-c", "type": "git", "ref": "main", "url": "{url}"}}
+        ]
+    }}"#
+    );
+    let temp = common::project_with_hmm_json(&with_dir);
+    let dev_file = temp.child(".haxelib/switch-c/.dev");
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success();
+    dev_file.assert(predicate::path::is_file());
+
+    std::fs::write(temp.child("hmm.json").path(), without_dir).unwrap();
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("development directory unset"));
+    dev_file.assert(predicate::path::missing());
+}
