@@ -5,8 +5,8 @@ use crate::hmm::haxelib::{Haxelib, HaxelibType};
 use anyhow::{anyhow, Context, Result};
 use console::Emoji;
 use gix::hash::Prefix;
-use std::io::Read;
 use owo_colors::OwoColorize;
+use std::io::Read;
 
 pub struct HaxelibStatus<'a> {
     pub lib: &'a Haxelib,
@@ -21,11 +21,11 @@ pub enum InstallType {
     Missing,          // Needs to be installed
     MissingGit,       // Needs to be cloned
     MissingDevLink,   // Git repo present at correct commit, but subdir `.dev` link is missing
-    StaleDevLink,     // Git repo present at correct commit, but a `.dev` link exists with no subdir configured
-    Outdated,         // Installed but wrong version
+    StaleDevLink, // Git repo present at correct commit, but a `.dev` link exists with no subdir configured
+    Outdated,     // Installed but wrong version
     AlreadyInstalled, // Correctly installed
-    Conflict,         // Version conflicts between dependencies
-    NotLocked,        // Version in hmm.json isn't locked to anything, prompt to lock?
+    Conflict,     // Version conflicts between dependencies
+    NotLocked,    // Version in hmm.json isn't locked to anything, prompt to lock?
 }
 
 impl<'a> HaxelibStatus<'a> {
@@ -348,7 +348,11 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             println!(
                 "Expected: {} | Installed: {}",
                 haxelib_status.wants.as_deref().unwrap_or("unknown").red(),
-                haxelib_status.installed.as_deref().unwrap_or("unknown").red()
+                haxelib_status
+                    .installed
+                    .as_deref()
+                    .unwrap_or("unknown")
+                    .red()
             );
         }
         InstallType::AlreadyInstalled => {
@@ -356,7 +360,12 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
                 "{} [{:?}]: {} {}",
                 haxelib_status.lib.name.green().bold(),
                 haxelib_status.lib.haxelib_type.green().dimmed(),
-                haxelib_status.wants.as_deref().unwrap_or("unknown").green().dimmed(),
+                haxelib_status
+                    .wants
+                    .as_deref()
+                    .unwrap_or("unknown")
+                    .green()
+                    .dimmed(),
                 Emoji("✅", "[✔️]")
             );
             println!("{}", inner.bright_green());
@@ -383,7 +392,11 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             println!(
                 "{} {}",
                 "`hmm lock` to version:".bright_yellow(),
-                haxelib_status.installed.as_deref().unwrap_or("unknown").yellow()
+                haxelib_status
+                    .installed
+                    .as_deref()
+                    .unwrap_or("unknown")
+                    .yellow()
             )
         }
     }

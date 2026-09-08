@@ -301,7 +301,9 @@ fn check_git_detects_missing_clone() {
         .arg("check")
         .assert()
         .success()
-        .stdout(predicate::str::contains("is not cloned / installed (via git)"));
+        .stdout(predicate::str::contains(
+            "is not cloned / installed (via git)",
+        ));
 }
 
 /// Regression: the git/ checkout is at the right commit, but `.current`

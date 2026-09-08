@@ -87,10 +87,8 @@ fn lock_selective_locks_only_named_libs() {
             {"name": "lib-b", "type": "haxelib", "version": null}
         ]
     }"#;
-    let temp = common::project_with_installed_haxelibs(
-        json,
-        &[("lib-a", "3.0.0"), ("lib-b", "4.0.0")],
-    );
+    let temp =
+        common::project_with_installed_haxelibs(json, &[("lib-a", "3.0.0"), ("lib-b", "4.0.0")]);
 
     Command::cargo_bin("hmm-rs")
         .unwrap()
@@ -198,9 +196,10 @@ fn lock_git_upgrades_short_sha_to_full() {
     let (_repo, temp, head_sha) = installed_git_project();
 
     let json_path = temp.child("hmm.json");
-    let short_locked = std::fs::read_to_string(json_path.path())
-        .unwrap()
-        .replace("\"ref\": \"main\"", &format!("\"ref\": \"{}\"", &head_sha[..7]));
+    let short_locked = std::fs::read_to_string(json_path.path()).unwrap().replace(
+        "\"ref\": \"main\"",
+        &format!("\"ref\": \"{}\"", &head_sha[..7]),
+    );
     std::fs::write(json_path.path(), short_locked).unwrap();
     assert_eq!(read_locked_ref(&temp), head_sha[..7]);
 
@@ -280,7 +279,9 @@ fn lock_skips_dev_dependency() {
         .arg("lock")
         .assert()
         .success()
-        .stdout(predicate::str::contains("dev dependencies are already locked by path"));
+        .stdout(predicate::str::contains(
+            "dev dependencies are already locked by path",
+        ));
 }
 
 #[test]

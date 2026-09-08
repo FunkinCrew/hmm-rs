@@ -7,6 +7,7 @@ use anyhow::{anyhow, Context, Result};
 use console::Emoji;
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressFinish, ProgressStyle};
+use owo_colors::OwoColorize;
 use reqwest::Client as ReqwestClient;
 use std::env;
 use std::fs::File;
@@ -14,7 +15,6 @@ use std::io::{self, stdin, stdout, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
-use owo_colors::OwoColorize;
 use zip::ZipArchive;
 
 use super::check_command::compare_haxelib_to_hmm;
@@ -447,7 +447,10 @@ pub fn handle_install(
 }
 
 #[tokio::main]
-pub async fn install_from_haxelib(haxelib: &Haxelib, counter: Option<(usize, usize)>) -> Result<()> {
+pub async fn install_from_haxelib(
+    haxelib: &Haxelib,
+    counter: Option<(usize, usize)>,
+) -> Result<()> {
     println!(
         "{}Downloading: {} - {} - {}",
         counter_lead(counter),
@@ -728,12 +731,14 @@ fn smart_checkout_git_ref(
     // Commit not found locally - fetch from managed remote and retry
     vprintln!(
         "Commit {} not found locally, fetching from {}...",
-        target_ref, remote_name
+        target_ref,
+        remote_name
     );
 
     let pb = git_bar(prefix, &format!("fetching from {remote_name}"));
-    let fetch_result = run_git_with_progress(&["-C", repo, "fetch", "--progress", &remote_name], &pb)
-        .context("Failed to execute git fetch")?;
+    let fetch_result =
+        run_git_with_progress(&["-C", repo, "fetch", "--progress", &remote_name], &pb)
+            .context("Failed to execute git fetch")?;
     pb.finish_and_clear();
 
     if !fetch_result.status.success() {
@@ -1033,13 +1038,7 @@ fn ensure_git_remote(repo_path: &Path, remote_name: &str, url: &str) -> Result<(
 fn rename_origin_remote(repo_path: &Path, new_name: &str) -> Result<()> {
     // Check if origin exists
     let check_origin = std::process::Command::new("git")
-        .args([
-            "-C",
-            path_to_str(repo_path)?,
-            "remote",
-            "get-url",
-            "origin",
-        ])
+        .args(["-C", path_to_str(repo_path)?, "remote", "get-url", "origin"])
         .output()
         .context("Failed to check origin remote")?;
 
@@ -1380,7 +1379,12 @@ pub fn create_current_file(path: &Path, content: &String) -> Result<()> {
 /// `-lib <name>` resolves to `.haxelib/<name>/git/<dir>/`. This mirrors real haxelib,
 /// which sets a dev path to `<versionPath>/<subDir>` for subdirectory git installs.
 pub fn ensure_git_subdir_dev_link(haxelib: &Haxelib) -> Result<()> {
-    let subdir = match haxelib.dir.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+    let subdir = match haxelib
+        .dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
         Some(d) => d,
         None => {
             // No subdir now, but one may have been set before (or this lib
@@ -1588,15 +1592,17 @@ mod tests {
         assert_eq!(pb.length(), Some(4));
         assert_eq!(pb.message(), "Resolving deltas");
         sink.push(b"fatal: early EOF");
-        assert_eq!(sink.lines, vec!["Cloning into '/tmp/x'...", "fatal: early EOF"]);
+        assert_eq!(
+            sink.lines,
+            vec!["Cloning into '/tmp/x'...", "fatal: early EOF"]
+        );
     }
 
     #[test]
     fn run_git_with_progress_collects_stderr_on_failure() {
         let missing = tempfile::TempDir::new().unwrap().path().join("nope");
         let pb = ProgressBar::hidden();
-        let run =
-            run_git_with_progress(&["-C", missing.to_str().unwrap(), "status"], &pb).unwrap();
+        let run = run_git_with_progress(&["-C", missing.to_str().unwrap(), "status"], &pb).unwrap();
         assert!(!run.status.success());
         assert!(
             run.stderr.iter().any(|l| l.starts_with("fatal:")),
@@ -1724,11 +1730,24 @@ mod tests {
             .output()
             .unwrap();
         std::process::Command::new("git")
-            .args(["-C", path, "remote", "add", "origin", "https://example.com/repo"])
+            .args([
+                "-C",
+                path,
+                "remote",
+                "add",
+                "origin",
+                "https://example.com/repo",
+            ])
             .output()
             .unwrap();
         std::process::Command::new("git")
-            .args(["-C", path, "config", "remote.origin.partialclonefilter", "blob:none"])
+            .args([
+                "-C",
+                path,
+                "config",
+                "remote.origin.partialclonefilter",
+                "blob:none",
+            ])
             .output()
             .unwrap();
         assert!(is_partial_clone(temp.path()));
@@ -1743,7 +1762,14 @@ mod tests {
             .output()
             .unwrap();
         std::process::Command::new("git")
-            .args(["-C", path, "remote", "add", "test-remote", "https://example.com/repo"])
+            .args([
+                "-C",
+                path,
+                "remote",
+                "add",
+                "test-remote",
+                "https://example.com/repo",
+            ])
             .output()
             .unwrap();
 
@@ -1756,7 +1782,12 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&promisor.stdout).trim(), "true");
 
         let filter = std::process::Command::new("git")
-            .args(["-C", path, "config", "remote.test-remote.partialclonefilter"])
+            .args([
+                "-C",
+                path,
+                "config",
+                "remote.test-remote.partialclonefilter",
+            ])
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&filter.stdout).trim(), "blob:none");
@@ -1771,7 +1802,14 @@ mod tests {
             .output()
             .unwrap();
         std::process::Command::new("git")
-            .args(["-C", path, "remote", "add", "test-remote", "https://example.com/repo"])
+            .args([
+                "-C",
+                path,
+                "remote",
+                "add",
+                "test-remote",
+                "https://example.com/repo",
+            ])
             .output()
             .unwrap();
 

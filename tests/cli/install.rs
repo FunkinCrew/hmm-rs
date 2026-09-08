@@ -271,7 +271,8 @@ fn install_continues_past_bad_git_ref() {
         .stdout(predicate::str::contains("failed to install"));
 
     // The good dep after the failing one still got installed
-    let current = std::fs::read_to_string(temp.child(".haxelib/contpast-b/.current").path()).unwrap();
+    let current =
+        std::fs::read_to_string(temp.child(".haxelib/contpast-b/.current").path()).unwrap();
     assert_eq!(current, "git");
     temp.child(".haxelib/contpast-b/git/README.md")
         .assert(predicate::path::is_file());
@@ -301,7 +302,8 @@ fn install_continues_past_failed_haxelib_download() {
         .stdout(predicate::str::contains("failed to install"));
 
     // The good dep after the failing one still got installed
-    let current = std::fs::read_to_string(temp.child(".haxelib/contpast-d/.current").path()).unwrap();
+    let current =
+        std::fs::read_to_string(temp.child(".haxelib/contpast-d/.current").path()).unwrap();
     assert_eq!(current, "1.0.0");
     temp.child(".haxelib/contpast-d/1,0,0/haxelib.json")
         .assert(predicate::path::is_file());
@@ -512,7 +514,10 @@ fn install_rewrites_current_when_switching_back_to_git() {
 
     std::fs::write(temp.child("hmm.json").path(), haxelib_json).unwrap();
     install().assert().success();
-    assert_eq!(std::fs::read_to_string(current_path.path()).unwrap(), "1.0.0");
+    assert_eq!(
+        std::fs::read_to_string(current_path.path()).unwrap(),
+        "1.0.0"
+    );
     temp.child(".haxelib/switch-a/git")
         .assert(predicate::path::is_dir());
 
