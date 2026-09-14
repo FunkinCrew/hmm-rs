@@ -5,6 +5,7 @@
 //! in every `cargo test`, so the invariants are enforced on every PR.
 
 use hmm_rs::commands::haxelib_command::{parse_remoting_response, parse_spec};
+use hmm_rs::commands::init_command::{parse_repo_version, REPO_VERSION};
 use hmm_rs::commands::install_command::{parse_git_progress, sanitize_zip_entry, GitProgress};
 use hmm_rs::commands::tohxml_command::render_hxml;
 use hmm_rs::hmm::dependencies::Dependancies;
@@ -373,5 +374,16 @@ proptest! {
             "line: {:?}",
             line
         );
+    }
+}
+
+proptest! {
+    /// `.repo-version` is haxelib's integer-plus-newline marker; the version
+    /// hmm-rs writes must read back as itself, and no content may panic.
+    #[test]
+    fn repo_version_round_trips_and_never_panics(v in any::<u32>(), junk in "\\PC{0,16}") {
+        prop_assert_eq!(parse_repo_version(&format!("{v}\n")), Some(v));
+        prop_assert_eq!(parse_repo_version(&format!("{REPO_VERSION}\n")), Some(REPO_VERSION));
+        let _ = parse_repo_version(&junk);
     }
 }

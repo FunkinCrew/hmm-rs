@@ -53,3 +53,20 @@ fn init_does_not_overwrite_existing_hmm_json() {
     let content = std::fs::read_to_string(temp.child("hmm.json").path()).unwrap();
     assert_eq!(content, original);
 }
+
+#[test]
+fn init_writes_repo_version_marker() {
+    let temp = assert_fs::TempDir::new().unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("init")
+        .assert()
+        .success();
+
+    // haxelib >= 4.2.0 reads this on every command and nags about `fixrepo`
+    // when it is missing; the format is the integer plus a newline.
+    let content = std::fs::read_to_string(temp.child(".haxelib/.repo-version").path()).unwrap();
+    assert_eq!(content, "1\n");
+}

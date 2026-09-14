@@ -109,3 +109,22 @@ fn dev_overwrites_existing_entry_instead_of_duplicating() {
     assert!(json_content.contains("\"type\": \"dev\""));
     assert!(!json_content.contains("\"type\": \"git\""));
 }
+
+#[test]
+fn dev_creates_haxelib_dir_with_repo_version_marker() {
+    let temp = common::project_with_empty_hmm_json();
+    temp.child("src-lib").create_dir_all().unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["dev", "src-lib", "src-lib"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Creating .haxelib/ folder"));
+
+    temp.child(".haxelib/src-lib/.dev")
+        .assert(predicate::path::is_file());
+    let marker = std::fs::read_to_string(temp.child(".haxelib/.repo-version").path()).unwrap();
+    assert_eq!(marker, "1\n");
+}

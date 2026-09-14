@@ -15,6 +15,7 @@ use crate::hmm::{
 /// `.haxelib/<name-with-commas>/.dev` containing the given path. `absolute_path`
 /// is expected to already be absolute (callers canonicalize before calling).
 pub fn write_dev_file(name: &str, absolute_path: &Path) -> Result<()> {
+    super::init_command::ensure_haxelib_folder()?;
     let lib_dir = lib_dir_path_for_name(name);
     if !lib_dir.exists() {
         fs::create_dir_all(&lib_dir)?;

@@ -629,3 +629,68 @@ fn install_git_dep_dropping_dir_clears_dev_link() {
         .stdout(predicate::str::contains("development directory unset"));
     dev_file.assert(predicate::path::missing());
 }
+
+// `.haxelib/.repo-version` is haxelib 4.2.0's repository format marker. A
+// missing marker makes every haxelib command nag about `haxelib fixrepo`, and
+// running fixrepo would lowercase hmm-rs's exact-case lib dirs, so hmm-rs
+// writes the marker itself. No deps are declared in these tests, so `install`
+// never touches the network.
+
+#[test]
+fn install_backfills_repo_version_marker_into_existing_haxelib_dir() {
+    let temp = common::initialized_project();
+    temp.child(".haxelib/.repo-version")
+        .assert(predicate::path::missing());
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success();
+
+    let marker = std::fs::read_to_string(temp.child(".haxelib/.repo-version").path()).unwrap();
+    assert_eq!(marker, "1\n");
+}
+
+#[test]
+fn install_leaves_current_repo_version_marker_untouched() {
+    let temp = common::initialized_project();
+    // Deliberately not byte-identical to what hmm-rs writes: same version,
+    // different whitespace. It must survive untouched.
+    temp.child(".haxelib/.repo-version")
+        .write_str(" 1 \n")
+        .unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("newer").not());
+
+    let marker = std::fs::read_to_string(temp.child(".haxelib/.repo-version").path()).unwrap();
+    assert_eq!(marker, " 1 \n");
+}
+
+#[test]
+fn install_warns_on_newer_repo_version_marker_and_keeps_it() {
+    let temp = common::initialized_project();
+    temp.child(".haxelib/.repo-version")
+        .write_str("2\n")
+        .unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            ".repo-version is 2, newer than the 1",
+        ));
+
+    let marker = std::fs::read_to_string(temp.child(".haxelib/.repo-version").path()).unwrap();
+    assert_eq!(marker, "2\n");
+}
