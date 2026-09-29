@@ -5,7 +5,7 @@ use owo_colors::OwoColorize;
 
 use crate::hmm::{
     dependencies::Dependancies,
-    haxelib::lib_dir_path_for_name,
+    haxelib::{exact_case_lib_dir_path_for_name, lib_dir_path_for_name},
     json,
 };
 
@@ -29,10 +29,17 @@ pub fn remove_haxelibs(
     }
 
     for name in &to_remove {
-        let lib_path = lib_dir_path_for_name(name);
-        if lib_path.exists() {
-            std::fs::remove_dir_all(&lib_path)
-                .with_context(|| format!("Failed to remove {}", lib_path.display()))?;
+        // On a case-sensitive filesystem a mixed-case name also has an
+        // exact-case symlink, or an exact-case dir from before hmm-rs
+        // lowercased. `remove_dir_all` unlinks a symlink without following it.
+        for lib_path in [
+            lib_dir_path_for_name(name),
+            exact_case_lib_dir_path_for_name(name),
+        ] {
+            if lib_path.symlink_metadata().is_ok() {
+                std::fs::remove_dir_all(&lib_path)
+                    .with_context(|| format!("Failed to remove {}", lib_path.display()))?;
+            }
         }
         println!("removed {}", name.green().bold());
     }

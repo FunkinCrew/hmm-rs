@@ -517,16 +517,8 @@ pub async fn install_from_haxelib(
         }
     }
 
-    let output_dir = haxelib.lib_dir_path();
-
-    if let Err(e) = std::fs::create_dir(&output_dir) {
-        if e.kind() != std::io::ErrorKind::AlreadyExists {
-            return Err(anyhow!(
-                "Error creating directory: {:?}",
-                output_dir.as_path()
-            ));
-        }
-    }
+    let output_dir = crate::hmm::haxelib::ensure_lib_dir(&haxelib.name)
+        .with_context(|| format!("Error creating directory: {:?}", haxelib.lib_dir_path()))?;
 
     // unzipping
     let archive =
@@ -535,7 +527,9 @@ pub async fn install_from_haxelib(
     let mut zip_file =
         ZipArchive::new(archive).context("Error opening zip file - file may be corrupted")?;
 
-    let unzipped_output_dir = output_dir.join(haxelib.version_as_commas()?);
+    // haxelib 4.2.0 lowercases version dirs too (`1,0,0-RC,1` -> `1,0,0-rc,1`).
+    let unzipped_output_dir =
+        crate::hmm::haxelib::ensure_case_aliased_dir(&output_dir, &haxelib.version_as_commas()?)?;
 
     // Find the base path by locating the shallowest haxelib.json in the ZIP.
     // Some haxelib packages nest all files under a wrapper directory (e.g. "release/"),
@@ -615,7 +609,9 @@ pub fn install_or_update_git_cli(
     counter: Option<(usize, usize)>,
 ) -> Result<()> {
     let git_dir_path = haxelib.git_repo_path();
-    let parent_dir = haxelib.lib_dir_path();
+    // Before the existence check: this also moves a clone out of an old
+    // exact-case lib dir, so it is reused instead of cloned again.
+    let parent_dir = crate::hmm::haxelib::ensure_lib_dir(&haxelib.name)?;
     let prefix = bar_prefix(haxelib, counter);
 
     // Ensure repository exists (clone if needed)

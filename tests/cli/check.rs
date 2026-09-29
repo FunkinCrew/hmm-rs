@@ -547,3 +547,25 @@ fn check_rejects_comma_name_in_hmm_json() {
         .failure()
         .stderr(predicate::str::contains("is not allowed"));
 }
+
+#[test]
+fn check_finds_mixed_case_lib_in_lowercase_dir() {
+    // The layout haxelib 4.2.0 and hmm-rs write: `.haxelib/chkmix/` plus
+    // `.name`, with no exact-case entry.
+    let json = r#"{
+        "dependencies": [
+            {"name": "ChkMix", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("ChkMix", "1.0.0")]);
+    temp.child(".haxelib/chkmix/.name")
+        .write_str("ChkMix")
+        .unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success();
+}

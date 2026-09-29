@@ -34,17 +34,39 @@ pub fn project_with_hmm_json(json: &str) -> TempDir {
     temp
 }
 
-/// Creates a TempDir with hmm.json and .haxelib/<lib>/.current files
+/// Creates a TempDir with hmm.json and .haxelib/<lib>/.current files, with
+/// <lib> lowercased as hmm-rs and haxelib 4.2.0 store it
 pub fn project_with_installed_haxelibs(json: &str, libs: &[(&str, &str)]) -> TempDir {
     let temp = project_with_hmm_json(json);
     temp.child(".haxelib").create_dir_all().unwrap();
     for (name, version) in libs {
-        let lib_name = name.replace(".", ",");
+        let lib_name = name.replace(".", ",").to_ascii_lowercase();
         temp.child(format!(".haxelib/{lib_name}/.current"))
             .write_str(version)
             .unwrap();
     }
     temp
+}
+
+/// Entry names stored in `dir`, sorted. On a case-insensitive filesystem a
+/// listing is the only way to see which case an entry is stored in.
+pub fn stored_names(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    names
+}
+
+/// Whether the filesystem holding `dir` tells names apart by case (Linux,
+/// case-sensitive APFS) or not (default macOS and Windows).
+pub fn is_case_sensitive(dir: &std::path::Path) -> bool {
+    let probe = dir.join("case-probe");
+    std::fs::create_dir(&probe).unwrap();
+    let sensitive = !dir.join("CASE-PROBE").exists();
+    std::fs::remove_dir(&probe).unwrap();
+    sensitive
 }
 
 /// Reads a sample fixture file content

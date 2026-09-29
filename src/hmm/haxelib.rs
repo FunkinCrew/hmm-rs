@@ -1,6 +1,7 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Haxelib {
@@ -125,20 +126,84 @@ impl Haxelib {
         Ok(self.version()?.replace(".", ","))
     }
 
-    /// Returns the library directory path: .haxelib/{name_with_commas}
+    /// Returns the library directory path: .haxelib/{name_with_commas, lowercased}
     pub fn lib_dir_path(&self) -> PathBuf {
         lib_dir_path_for_name(&self.name)
     }
 
-    /// Returns the git repo path: .haxelib/{name_with_commas}/git
+    /// Returns the git repo path: .haxelib/{name_with_commas, lowercased}/git
     pub fn git_repo_path(&self) -> PathBuf {
         self.lib_dir_path().join("git")
     }
 }
 
-/// Returns the library directory path given a library name
+/// Returns the library directory path given a library name: dots encoded as
+/// commas and lowercased, the only form haxelib 4.2.0 looks up
+/// (`Repository.addToRepoPath`). `ensure_lib_dir` makes the hmm.json-case
+/// name resolve here too, for haxelib 4.1.1.
 pub fn lib_dir_path_for_name(name: &str) -> PathBuf {
+    exact_case_lib_dir_path_for_name(&name.to_ascii_lowercase())
+}
+
+/// `.haxelib/<name>` with dots encoded as commas, in hmm.json case: where
+/// haxelib 4.1.1 looks (`rep + Data.safe(name)`).
+pub fn exact_case_lib_dir_path_for_name(name: &str) -> PathBuf {
     PathBuf::from(".haxelib").join(name.replace(".", ","))
+}
+
+/// Creates the library directory for `name` so that both haxelib 4.1.1 and
+/// 4.2.0 resolve it, writes `.name` the way 4.2.0's `setCapitalization` does
+/// (only for a name with capitals, so `haxelib list` shows it in hmm.json
+/// case), and returns `lib_dir_path_for_name(name)`.
+pub fn ensure_lib_dir(name: &str) -> Result<PathBuf> {
+    let dir = ensure_case_aliased_dir(Path::new(".haxelib"), &name.replace(".", ","))?;
+    let name_file = dir.join(".name");
+    if name != name.to_ascii_lowercase() {
+        fs::write(&name_file, name)?;
+    } else if name_file.exists() {
+        fs::remove_file(&name_file)?;
+    }
+    Ok(dir)
+}
+
+/// Creates `parent/<dir_name lowercased>`, the only form haxelib 4.2.0 looks
+/// up, and makes `parent/<dir_name>` resolve to it for haxelib 4.1.1, which
+/// looks up the exact case. On a case-insensitive filesystem the two names
+/// already alias; on a case-sensitive one that takes a relative symlink.
+/// Returns the lowercased path.
+pub fn ensure_case_aliased_dir(parent: &Path, dir_name: &str) -> Result<PathBuf> {
+    let lower_name = dir_name.to_ascii_lowercase();
+    let lower = parent.join(&lower_name);
+    if lower_name == dir_name {
+        fs::create_dir_all(&lower)?;
+        return Ok(lower);
+    }
+
+    // A real exact-case dir from before hmm-rs lowercased is renamed rather
+    // than installed beside, so a git clone and its local changes survive.
+    // Only a listing shows the stored case on a case-insensitive filesystem,
+    // where this is a case-only rename.
+    let exact = parent.join(dir_name);
+    let (mut legacy, mut has_lower) = (false, false);
+    for entry in fs::read_dir(parent).into_iter().flatten().flatten() {
+        if entry.file_name() == dir_name {
+            legacy = entry.file_type()?.is_dir();
+        } else if entry.file_name() == lower_name.as_str() {
+            has_lower = true;
+        }
+    }
+    if legacy && !has_lower {
+        fs::rename(&exact, &lower)
+            .with_context(|| format!("Failed to rename {} to lowercase", exact.display()))?;
+    }
+    fs::create_dir_all(&lower)?;
+
+    if !exact.exists() {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&lower_name, &exact)
+            .with_context(|| format!("Failed to link {} to {lower_name}", exact.display()))?;
+    }
+    Ok(lower)
 }
 
 /// Enforces the haxelib name charset: `A-Z a-z 0-9 _ . -` (the allowlist
@@ -146,9 +211,11 @@ pub fn lib_dir_path_for_name(name: &str) -> PathBuf {
 /// encoding). Anything outside it can never work with the real toolchain
 /// (`haxelib path` throws "Invalid parameter"), so rejecting here loses
 /// nothing and guarantees:
-/// - `lib_dir_path_for_name` is injective (commas are rejected, so `a,b`
-///   can no longer alias `a.b`) and always resolves to a single directory
-///   inside `.haxelib/` (no separators, and `..` encodes to `,,`),
+/// - `lib_dir_path_for_name` is injective up to ASCII case (commas are
+///   rejected, so `a,b` can no longer alias `a.b`; case variants share a
+///   directory, as haxelib treats them as one library) and always resolves
+///   to a single directory inside `.haxelib/` (no separators, and `..`
+///   encodes to `,,`),
 /// - names are safe in the compiler's unquoted `haxelib path <names>`
 ///   shell-out and byte-length-correct in the remoting serialization.
 ///
@@ -254,6 +321,91 @@ mod tests {
             lib_dir_path_for_name("funkin.vis"),
             PathBuf::from(".haxelib/funkin,vis")
         );
+    }
+
+    #[test]
+    fn test_lib_dir_path_for_name_lowercases() {
+        // haxelib 4.2.0 only looks up `Data.safe(name).toLowerCase()`.
+        assert_eq!(
+            lib_dir_path_for_name("FlxPartial.Sound"),
+            PathBuf::from(".haxelib/flxpartial,sound")
+        );
+        assert_eq!(
+            exact_case_lib_dir_path_for_name("FlxPartial.Sound"),
+            PathBuf::from(".haxelib/FlxPartial,Sound")
+        );
+    }
+
+    // --- ensure_case_aliased_dir ---
+
+    /// Whether `dir` is case-sensitive, probed the way the code under test
+    /// sees it: does a case variant of an existing name resolve?
+    fn case_sensitive(dir: &Path) -> bool {
+        fs::create_dir(dir.join("probe")).unwrap();
+        let sensitive = !dir.join("PROBE").exists();
+        fs::remove_dir(dir.join("probe")).unwrap();
+        sensitive
+    }
+
+    fn stored_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn test_ensure_case_aliased_dir_lowercase_name_is_plain_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = ensure_case_aliased_dir(temp.path(), "flixel").unwrap();
+        assert_eq!(dir, temp.path().join("flixel"));
+        assert!(dir.is_dir());
+        assert_eq!(stored_names(temp.path()), ["flixel"]);
+    }
+
+    #[test]
+    fn test_ensure_case_aliased_dir_mixed_case_resolves_both_ways() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = ensure_case_aliased_dir(temp.path(), "FlxFoo").unwrap();
+        assert_eq!(dir, temp.path().join("flxfoo"));
+        assert!(temp.path().join("flxfoo").is_dir());
+        assert!(temp.path().join("FlxFoo").is_dir());
+
+        if case_sensitive(temp.path()) {
+            assert_eq!(stored_names(temp.path()), ["FlxFoo", "flxfoo"]);
+            assert_eq!(
+                fs::read_link(temp.path().join("FlxFoo")).unwrap(),
+                PathBuf::from("flxfoo")
+            );
+        } else {
+            assert_eq!(stored_names(temp.path()), ["flxfoo"]);
+        }
+
+        // Idempotent: a second call neither fails on the existing link nor
+        // adds anything.
+        let before = stored_names(temp.path());
+        ensure_case_aliased_dir(temp.path(), "FlxFoo").unwrap();
+        assert_eq!(stored_names(temp.path()), before);
+    }
+
+    #[test]
+    fn test_ensure_case_aliased_dir_migrates_exact_case_dir() {
+        // A dir left by the old exact-case layout keeps its contents (e.g. a
+        // git clone) and ends up stored lowercase.
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("FlxFoo/git")).unwrap();
+        fs::write(temp.path().join("FlxFoo/git/local-change"), "x").unwrap();
+
+        let dir = ensure_case_aliased_dir(temp.path(), "FlxFoo").unwrap();
+
+        assert!(dir.join("git/local-change").is_file());
+        assert!(temp.path().join("FlxFoo/git/local-change").is_file());
+        assert!(stored_names(temp.path()).contains(&"flxfoo".to_string()));
+        assert!(fs::symlink_metadata(temp.path().join("flxfoo"))
+            .unwrap()
+            .is_dir());
     }
 
     #[test]

@@ -775,9 +775,9 @@ fn install_leaves_installed_versionless_haxelib_alone() {
 
 // `.haxelib/.repo-version` is haxelib 4.2.0's repository format marker. A
 // missing marker makes every haxelib command nag about `haxelib fixrepo`, and
-// running fixrepo would lowercase hmm-rs's exact-case lib dirs, so hmm-rs
-// writes the marker itself. No deps are declared in these tests, so `install`
-// never touches the network.
+// hmm-rs's layout (lowercase dirs plus `.name`) is already format 1, so
+// hmm-rs writes the marker itself. No deps are declared in these tests, so
+// `install` never touches the network.
 
 #[test]
 fn install_backfills_repo_version_marker_into_existing_haxelib_dir() {
@@ -836,4 +836,113 @@ fn install_warns_on_newer_repo_version_marker_and_keeps_it() {
 
     let marker = std::fs::read_to_string(temp.child(".haxelib/.repo-version").path()).unwrap();
     assert_eq!(marker, "2\n");
+}
+
+// Mixed-case names: haxelib 4.2.0 only looks up lowercased lib and version
+// dirs, haxelib 4.1.1 (bundled with haxe) only the exact case. hmm-rs stores
+// the lowercase form and, on a case-sensitive filesystem, links the exact case
+// to it; elsewhere the filesystem aliases the two by itself.
+
+#[test]
+fn install_mixed_case_haxelib_resolves_in_both_cases() {
+    let stub = common::RegistryStub::serve(&[("CaseMix", "1.0.0-RC.1")]);
+    let json = r#"{
+        "dependencies": [
+            {"name": "CaseMix", "type": "haxelib", "version": "1.0.0-RC.1"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .arg("install")
+        .assert()
+        .success();
+
+    let repo = temp.path().join(".haxelib");
+    let lib = repo.join("casemix");
+    // 4.2.0 lookups and 4.1.1 lookups both land on the extracted files.
+    assert!(lib.join("1,0,0-rc,1/haxelib.json").is_file());
+    assert!(repo.join("CaseMix/1,0,0-RC,1/haxelib.json").is_file());
+    assert_eq!(
+        std::fs::read_to_string(lib.join(".name")).unwrap(),
+        "CaseMix"
+    );
+    assert_eq!(
+        std::fs::read_to_string(lib.join(".current")).unwrap(),
+        "1.0.0-RC.1"
+    );
+
+    if common::is_case_sensitive(&repo) {
+        assert_eq!(
+            common::stored_names(&repo),
+            [".repo-version", "CaseMix", "casemix"]
+        );
+        assert_eq!(
+            std::fs::read_link(repo.join("CaseMix")).unwrap().to_str(),
+            Some("casemix")
+        );
+        assert_eq!(
+            std::fs::read_link(lib.join("1,0,0-RC,1")).unwrap().to_str(),
+            Some("1,0,0-rc,1")
+        );
+    } else {
+        assert_eq!(common::stored_names(&repo), [".repo-version", "casemix"]);
+        assert!(common::stored_names(&lib).contains(&"1,0,0-rc,1".to_string()));
+    }
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success();
+}
+
+#[test]
+fn install_moves_exact_case_git_clone_to_lowercase_dir() {
+    // A clone left by hmm-rs's old exact-case layout, with a local file that
+    // a fresh clone would not have. No `.current`, so `install` has work to do
+    // on every filesystem.
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let url = common::file_url(&repo_path);
+    let json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "GitMix", "type": "git", "ref": "main", "url": "{url}"}}
+        ]
+    }}"#
+    );
+    let temp = common::project_with_hmm_json(&json);
+    let status = std::process::Command::new("git")
+        .args(["clone", "-q", &url, ".haxelib/GitMix/git"])
+        .current_dir(temp.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    temp.child(".haxelib/GitMix/git/local-change")
+        .write_str("x")
+        .unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Repository exists"));
+
+    let repo = temp.path().join(".haxelib");
+    assert!(repo.join("gitmix/git/local-change").is_file());
+    assert!(repo.join("GitMix/git/local-change").is_file());
+    assert_eq!(
+        std::fs::read_to_string(repo.join("gitmix/.name")).unwrap(),
+        "GitMix"
+    );
+    assert!(common::stored_names(&repo).contains(&"gitmix".to_string()));
+    if common::is_case_sensitive(&repo) {
+        assert!(repo.join("GitMix").symlink_metadata().unwrap().is_symlink());
+    }
 }

@@ -158,3 +158,35 @@ fn remove_dotted_name_deletes_comma_dir() {
     temp.child(".haxelib/keep-lib/.current")
         .assert(predicate::path::is_file());
 }
+
+#[test]
+fn remove_mixed_case_lib_leaves_no_dir_or_link() {
+    // RmMix in the current layout (made by `dev`), RmOld in the pre-lowercase
+    // exact-case layout.
+    let json = r#"{
+        "dependencies": [
+            {"name": "RmOld", "type": "haxelib", "version": "1.0.0"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+    temp.child(".haxelib/RmOld/.current").write_str("1.0.0").unwrap();
+    temp.child("src").create_dir_all().unwrap();
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["dev", "RmMix", "src"])
+        .assert()
+        .success();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["remove", "RmMix", "RmOld"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        common::stored_names(&temp.path().join(".haxelib")),
+        [".repo-version"]
+    );
+}

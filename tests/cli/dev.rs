@@ -128,3 +128,36 @@ fn dev_creates_haxelib_dir_with_repo_version_marker() {
     let marker = std::fs::read_to_string(temp.child(".haxelib/.repo-version").path()).unwrap();
     assert_eq!(marker, "1\n");
 }
+
+#[test]
+fn dev_mixed_case_name_uses_lowercase_dir_with_name_file() {
+    let temp = common::initialized_project();
+    temp.child("src").create_dir_all().unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["dev", "DevMix", "src"])
+        .assert()
+        .success();
+
+    let repo = temp.path().join(".haxelib");
+    assert!(common::stored_names(&repo).contains(&"devmix".to_string()));
+    // Found by haxelib 4.2.0 (lowercase) and 4.1.1 (exact case) alike.
+    assert!(repo.join("devmix/.dev").is_file());
+    assert!(repo.join("DevMix/.dev").is_file());
+    assert_eq!(
+        std::fs::read_to_string(repo.join("devmix/.name")).unwrap(),
+        "DevMix"
+    );
+
+    // Like haxelib 4.2.0's setCapitalization, an all-lowercase name drops
+    // the capitalization record.
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["dev", "devmix", "src"])
+        .assert()
+        .success();
+    assert!(!repo.join("devmix/.name").exists());
+}

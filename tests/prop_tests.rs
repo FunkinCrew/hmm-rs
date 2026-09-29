@@ -9,7 +9,10 @@ use hmm_rs::commands::init_command::{parse_repo_version, REPO_VERSION};
 use hmm_rs::commands::install_command::{parse_git_progress, sanitize_zip_entry, GitProgress};
 use hmm_rs::commands::tohxml_command::render_hxml;
 use hmm_rs::hmm::dependencies::Dependancies;
-use hmm_rs::hmm::haxelib::{lib_dir_path_for_name, validate_lib_name, Haxelib, HaxelibType};
+use hmm_rs::hmm::haxelib::{
+    exact_case_lib_dir_path_for_name, lib_dir_path_for_name, validate_lib_name, Haxelib,
+    HaxelibType,
+};
 use hmm_rs::hmm::json;
 use proptest::prelude::*;
 use std::path::{Component, Path};
@@ -132,32 +135,39 @@ proptest! {
     }
 
     /// The dots-to-commas filesystem encoding is invertible for valid library
-    /// names. `validate_lib_name` enforces the haxelib charset `[A-Za-z0-9_.-]`
-    /// (no commas), so this generator IS the valid-name set and the round-trip
-    /// makes `lib_dir_path_for_name` injective over it: two distinct valid
-    /// names can never share a `.haxelib/` directory.
+    /// names up to ASCII case. `validate_lib_name` enforces the haxelib charset
+    /// `[A-Za-z0-9_.-]` (no commas), so this generator IS the valid-name set and
+    /// the round-trip makes `lib_dir_path_for_name` injective over it modulo
+    /// case: only case variants, which haxelib treats as one library, share a
+    /// `.haxelib/` directory. The exact-case path round-trips exactly.
     #[test]
     fn comma_encoding_round_trips(name in "[A-Za-z0-9_.-]{1,24}") {
         prop_assert!(validate_lib_name(&name).is_ok(), "charset name rejected: {:?}", name);
-        let dir = lib_dir_path_for_name(&name);
-        let encoded = dir.file_name().unwrap().to_str().unwrap().to_string();
-        prop_assert!(!encoded.contains('.'));
-        prop_assert_eq!(encoded.replace(',', "."), name);
+        for (path, expected) in [
+            (lib_dir_path_for_name(&name), name.to_ascii_lowercase()),
+            (exact_case_lib_dir_path_for_name(&name), name.clone()),
+        ] {
+            let encoded = path.file_name().unwrap().to_str().unwrap().to_string();
+            prop_assert!(!encoded.contains('.'));
+            prop_assert_eq!(encoded.replace(',', "."), expected);
+        }
     }
 
-    /// Any name that passes validation maps to exactly `.haxelib/<one dir>`.
-    /// Callers `remove_dir_all` this path, so escaping it is destructive.
+    /// Any name that passes validation maps to exactly `.haxelib/<one dir>`,
+    /// in both cases. Callers `remove_dir_all` these paths, so escaping them is
+    /// destructive.
     #[test]
     fn validated_names_stay_under_haxelib(name in adversarial_name()) {
         prop_assume!(validate_lib_name(&name).is_ok());
 
-        let path = lib_dir_path_for_name(&name);
-        prop_assert!(path.starts_with(".haxelib"), "{:?} escaped to {:?}", name, path);
-        prop_assert!(
-            path.components().all(|c| matches!(c, Component::Normal(_))),
-            "{:?} produced a non-normal component: {:?}", name, path
-        );
-        prop_assert_eq!(path.components().count(), 2, "{:?} -> {:?}", name, path);
+        for path in [lib_dir_path_for_name(&name), exact_case_lib_dir_path_for_name(&name)] {
+            prop_assert!(path.starts_with(".haxelib"), "{:?} escaped to {:?}", name, path);
+            prop_assert!(
+                path.components().all(|c| matches!(c, Component::Normal(_))),
+                "{:?} produced a non-normal component: {:?}", name, path
+            );
+            prop_assert_eq!(path.components().count(), 2, "{:?} -> {:?}", name, path);
+        }
     }
 
     /// Validation never accepts a name carrying a separator, control char, or
