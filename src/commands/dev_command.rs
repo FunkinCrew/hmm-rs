@@ -2,7 +2,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
+use owo_colors::OwoColorize;
 
 use crate::hmm::{
     self,
@@ -35,6 +36,31 @@ pub fn remove_dev_file(name: &str) -> Result<bool> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Resolves a dev dependency's hmm.json `path` to the absolute path its `.dev`
+/// marker should hold. Relative paths resolve against the cwd, as they do for
+/// `hmm-rs dev`.
+pub fn resolve_dev_path(haxelib: &Haxelib) -> Result<PathBuf> {
+    let path = haxelib
+        .path
+        .as_deref()
+        .ok_or_else(|| anyhow!("{}: 'path' field is required for dev type", haxelib.name))?;
+    Path::new(path)
+        .canonicalize()
+        .with_context(|| format!("dev path {path:?} not found"))
+}
+
+/// Installs a dev dependency from hmm.json by pointing its `.dev` marker at `path`.
+pub fn install_dev(haxelib: &Haxelib) -> Result<()> {
+    let absolute_path = resolve_dev_path(haxelib)?;
+    write_dev_file(&haxelib.name, &absolute_path)?;
+    println!(
+        "{}: development directory set to {}",
+        haxelib.name.green().bold(),
+        absolute_path.display()
+    );
+    Ok(())
 }
 
 pub fn add_dev_dependency(name: &str, path: &str, json_path: PathBuf) -> Result<()> {

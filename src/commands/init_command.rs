@@ -1,5 +1,5 @@
 use crate::hmm;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
 use std::path::Path;
 
@@ -10,32 +10,18 @@ pub const REPO_VERSION: u32 = 1;
 
 const REPO_VERSION_FILE: &str = ".repo-version";
 
+/// Like hmm's `init`: creates whichever of .haxelib/ and hmm.json is missing,
+/// so running it in a fresh clone never touches the committed hmm.json.
 pub fn init_hmm() -> Result<()> {
-    create_haxelib_folder()?;
+    ensure_haxelib_folder()?;
+    if Path::new("hmm.json").exists() {
+        println!("hmm.json already exists, leaving it as-is");
+        return Ok(());
+    }
     hmm::json::create_empty_hmm_json()
 }
 
-pub fn create_haxelib_folder() -> Result<()> {
-    create_haxelib_folder_at(Path::new("."))
-}
-
-pub fn create_haxelib_folder_at(base: &Path) -> Result<()> {
-    let haxelib_path = base.join(".haxelib");
-    if haxelib_path.exists() {
-        let err_message = format!(
-            "{} \n{}",
-            "A .haxelib folder already exists in this directory, so it won't be created.",
-            "use `hmm-rs clean` to remove the folder"
-        );
-        Err(anyhow!(err_message))?
-    }
-    println!("Creating .haxelib/ folder");
-    std::fs::create_dir(&haxelib_path).context("Failed to create .haxelib folder")?;
-    ensure_repo_version_file_at(base)
-}
-
-/// Ensures .haxelib/ exists, creating it if missing. Unlike create_haxelib_folder(),
-/// this does NOT error if the folder already exists.
+/// Ensures .haxelib/ exists, creating it if missing.
 pub fn ensure_haxelib_folder() -> Result<()> {
     ensure_haxelib_folder_at(Path::new("."))
 }

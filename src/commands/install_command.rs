@@ -341,7 +341,12 @@ enum ConflictResolution {
     Skip,    // Skip this library
 }
 
-pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -> Result<()> {
+pub fn install_from_hmm(
+    deps: &Dependancies,
+    libs: &[String],
+    separator: &str,
+    json_path: &Path,
+) -> Result<()> {
     super::init_command::ensure_haxelib_folder()?;
 
     let filtered = deps.filter_by_names(libs);
@@ -350,7 +355,7 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -
     // a slot in the [n/N] counter.
     let pending: Vec<&HaxelibStatus> = installs_needed
         .iter()
-        .filter(|s| s.install_type != InstallType::AlreadyInstalled)
+        .filter(|s| !s.install_type.is_satisfied())
         .collect();
     let total = pending.len();
     println!(
@@ -363,37 +368,18 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -
     for (i, install_status) in pending.iter().enumerate() {
         let counter = Some((i + 1, total));
         let result = match &install_status.install_type {
-            InstallType::Missing => handle_install(install_status, separator, counter),
-            InstallType::MissingGit => handle_install(install_status, separator, counter),
+            InstallType::Missing | InstallType::MissingGit | InstallType::Outdated => {
+                handle_install(install_status, separator, json_path, counter)
+            }
             InstallType::MissingDevLink | InstallType::StaleDevLink => {
                 ensure_git_subdir_dev_link(install_status.lib)
             }
-            InstallType::Outdated => match &install_status.lib.haxelib_type {
-                HaxelibType::Haxelib => install_from_haxelib(install_status.lib, counter),
-                HaxelibType::Git => {
-                    install_or_update_git_cli(install_status.lib, separator, counter)
-                }
-                lib_type => {
-                    println!(
-                        "{}: Installing from {:?} not yet implemented",
-                        install_status.lib.name.red(),
-                        lib_type
-                    );
-                    Ok(())
-                }
-            },
             InstallType::Conflict => {
                 // Handle git conflicts interactively
                 handle_git_conflict(install_status, separator, counter)
             }
-            InstallType::AlreadyInstalled => Ok(()), // do nothing on things already installed at the right version
-            _ => {
-                println!(
-                    "{} {:?}: Not implemented",
-                    install_status.lib.name, install_status.install_type
-                );
-                Ok(())
-            }
+            // filtered out of `pending` above
+            InstallType::AlreadyInstalled | InstallType::NotLocked => Ok(()),
         };
 
         if let Err(e) = result {
@@ -431,11 +417,16 @@ pub fn install_from_hmm(deps: &Dependancies, libs: &[String], separator: &str) -
 pub fn handle_install(
     haxelib_status: &HaxelibStatus,
     separator: &str,
+    json_path: &Path,
     counter: Option<(usize, usize)>,
 ) -> Result<()> {
     match &haxelib_status.lib.haxelib_type {
+        HaxelibType::Haxelib if haxelib_status.lib.version.is_none() => {
+            install_latest_haxelib(haxelib_status.lib, json_path, counter)?
+        }
         HaxelibType::Haxelib => install_from_haxelib(haxelib_status.lib, counter)?,
         HaxelibType::Git => install_or_update_git_cli(haxelib_status.lib, separator, counter)?,
+        HaxelibType::Dev => super::dev_command::install_dev(haxelib_status.lib)?,
         lib_type => println!(
             "{}: Installing from {:?} not yet implemented",
             haxelib_status.lib.name.red(),
@@ -444,6 +435,21 @@ pub fn handle_install(
     }
 
     Ok(())
+}
+
+/// Installs a haxelib dep with no version in hmm.json at the registry's
+/// latest, then pins that version in hmm.json, like `hmm-rs haxelib <name>`.
+fn install_latest_haxelib(
+    haxelib: &Haxelib,
+    json_path: &Path,
+    counter: Option<(usize, usize)>,
+) -> Result<()> {
+    let mut pinned = haxelib.clone();
+    pinned.version = Some(super::haxelib_command::resolve_latest_version(
+        &haxelib.name,
+    )?);
+    install_from_haxelib(&pinned, counter)?;
+    crate::hmm::json::upsert_dependencies(json_path, &[pinned])
 }
 
 #[tokio::main]

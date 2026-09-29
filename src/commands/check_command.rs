@@ -7,6 +7,7 @@ use console::Emoji;
 use gix::hash::Prefix;
 use owo_colors::OwoColorize;
 use std::io::Read;
+use std::path::Path;
 
 pub struct HaxelibStatus<'a> {
     pub lib: &'a Haxelib,
@@ -26,6 +27,14 @@ pub enum InstallType {
     AlreadyInstalled, // Correctly installed
     Conflict,     // Version conflicts between dependencies
     NotLocked,    // Version in hmm.json isn't locked to anything, prompt to lock?
+}
+
+impl InstallType {
+    /// Nothing for `install` to do and nothing for `check` to fail on. An
+    /// unpinned lib is satisfied by whatever version is installed.
+    pub fn is_satisfied(&self) -> bool {
+        matches!(self, InstallType::AlreadyInstalled | InstallType::NotLocked)
+    }
 }
 
 impl<'a> HaxelibStatus<'a> {
@@ -48,10 +57,12 @@ pub fn check(deps: &Dependancies, names: &[String], verbose: bool) -> Result<()>
     let filtered = deps.filter_by_names(names);
     let total = filtered.len();
     let installs = compare_haxelib_to_hmm(&filtered, verbose)?;
-    let installed_count = installs
+    let failed: Vec<&str> = installs
         .iter()
-        .filter(|i| i.install_type == InstallType::AlreadyInstalled)
-        .count();
+        .filter(|i| !i.install_type.is_satisfied())
+        .map(|i| i.lib.name.as_str())
+        .collect();
+    let installed_count = total - failed.len();
     println!(
         "{} / {} dependencie(s) are installed at the correct versions",
         installed_count.bold(),
@@ -62,6 +73,13 @@ pub fn check(deps: &Dependancies, names: &[String], verbose: bool) -> Result<()>
             "{} dependencie(s) are out of date or have changes",
             (total - installed_count).bold()
         );
+    }
+    if !failed.is_empty() {
+        return Err(anyhow!(
+            "{} dependencie(s) are not installed or have the wrong version: {}",
+            failed.len(),
+            failed.join(", ")
+        ));
     }
     Ok(())
 }
@@ -109,6 +127,10 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
             get_wants(haxelib),
             None,
         ));
+    }
+
+    if haxelib.haxelib_type == HaxelibType::Dev {
+        return Ok(check_dev_dependency(haxelib, &lib_path));
     }
 
     // Read the .current file
@@ -295,6 +317,36 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
     ))
 }
 
+/// A dev dep is installed when its `.dev` marker points at the hmm.json `path`.
+/// A `.current` alone doesn't count, since `haxelib path` would then resolve a
+/// version dir instead of the dev path.
+fn check_dev_dependency<'a>(haxelib: &'a Haxelib, lib_path: &Path) -> HaxelibStatus<'a> {
+    // A target that doesn't exist can't be linked; install reports why.
+    let (Ok(installed), Ok(wants)) = (
+        std::fs::read_to_string(lib_path.join(".dev")),
+        super::dev_command::resolve_dev_path(haxelib),
+    ) else {
+        return HaxelibStatus::new(haxelib, InstallType::Missing, get_wants(haxelib), None);
+    };
+    let installed = installed.trim();
+    let wants_str = wants.display().to_string();
+    // Compared as paths so a trailing slash (haxelib 4.2.0 writes one) is not a difference.
+    if Path::new(installed) != wants {
+        return HaxelibStatus::new(
+            haxelib,
+            InstallType::Outdated,
+            Some(wants_str),
+            Some(installed.to_string()),
+        );
+    }
+    HaxelibStatus::new(
+        haxelib,
+        InstallType::AlreadyInstalled,
+        Some(wants_str),
+        None,
+    )
+}
+
 fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
     match haxelib_status.install_type {
         InstallType::Missing => {
@@ -403,11 +455,12 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
     Ok(())
 }
 
-/// Returns either the haxelib version or the git ref of the haxelib
+/// Returns the haxelib version, the git ref, or the dev path of the haxelib
 fn get_wants(haxelib: &Haxelib) -> Option<String> {
     match haxelib.haxelib_type {
         HaxelibType::Haxelib => haxelib.version.clone(),
         HaxelibType::Git => haxelib.vcs_ref.clone(),
+        HaxelibType::Dev => haxelib.path.clone(),
         _ => None,
     }
 }
@@ -452,7 +505,7 @@ mod tests {
             version: None,
             path: Some("/some/path".to_string()),
         };
-        assert_eq!(get_wants(&haxelib), None);
+        assert_eq!(get_wants(&haxelib), Some("/some/path".to_string()));
     }
 
     #[test]

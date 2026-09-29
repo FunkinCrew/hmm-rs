@@ -23,15 +23,15 @@ fn test_clean_haxelib_folder() {
 }
 
 #[test]
-fn test_create_haxelib_folder() {
+fn test_ensure_haxelib_folder() {
     let tmp = assert_fs::TempDir::new().unwrap();
 
     // Should succeed when .haxelib doesn't exist
-    assert!(init_command::create_haxelib_folder_at(tmp.path()).is_ok());
+    assert!(init_command::ensure_haxelib_folder_at(tmp.path()).is_ok());
     tmp.child(".haxelib").assert(predicate::path::is_dir());
 
-    // Should fail when .haxelib already exists
-    assert!(init_command::create_haxelib_folder_at(tmp.path()).is_err());
+    // Should also succeed when .haxelib already exists
+    assert!(init_command::ensure_haxelib_folder_at(tmp.path()).is_ok());
 }
 
 #[test]

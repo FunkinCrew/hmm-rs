@@ -40,8 +40,11 @@ fn check_detects_missing_haxelib() {
         .current_dir(temp.path())
         .arg("check")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("is not installed"));
+        .failure()
+        .stdout(predicate::str::contains("is not installed"))
+        .stderr(predicate::str::contains(
+            "not installed or have the wrong version: missing-lib",
+        ));
 }
 
 #[test]
@@ -58,10 +61,12 @@ fn check_detects_wrong_version() {
         .current_dir(temp.path())
         .arg("check")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("is not at the correct version"));
 }
 
+/// An unpinned lib is satisfied by whatever version is installed, so check
+/// only hints at locking it and still exits 0.
 #[test]
 fn check_detects_unlocked_version() {
     let json = r#"{
@@ -154,7 +159,7 @@ fn check_default_shows_problems_and_count() {
         .current_dir(temp.path())
         .arg("check")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("is not at the correct version"))
         .stdout(predicate::str::contains("lib-a").not())
         .stdout(predicate::str::contains(
@@ -248,7 +253,7 @@ fn check_git_detects_wrong_commit() {
         .current_dir(temp.path())
         .arg("check")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("is not at the correct version"))
         .stdout(predicate::str::contains("(wrong commit)"));
 }
@@ -263,7 +268,7 @@ fn check_git_detects_local_changes_conflict() {
         .current_dir(temp.path())
         .arg("check")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("has issues"))
         .stdout(predicate::str::contains("(local changes)"));
 }
@@ -280,7 +285,7 @@ fn check_git_detects_wrong_commit_plus_local_changes_conflict() {
         .current_dir(temp.path())
         .arg("check")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("has issues"))
         .stdout(predicate::str::contains("(wrong commit + local changes)"));
 }
@@ -300,7 +305,7 @@ fn check_git_detects_missing_clone() {
         .current_dir(temp.path())
         .arg("check")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains(
             "is not cloned / installed (via git)",
         ));
@@ -320,7 +325,7 @@ fn check_git_detects_stale_current() {
         .current_dir(temp.path())
         .arg("check")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("is not at the correct version"))
         .stdout(predicate::str::contains("1.0.0"));
 }
@@ -338,7 +343,7 @@ fn check_git_detects_stale_dev_link() {
         .current_dir(temp.path())
         .arg("check")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("has a stale dev link"));
 }
 
@@ -358,6 +363,93 @@ fn check_unknown_lib_warns() {
         .assert()
         .success()
         .stdout(predicate::str::contains("not found in hmm.json"));
+}
+
+// --- dev deps ---
+
+/// A project with a dev dep on `./devsrc` (which exists) and `.haxelib/devlib/`
+/// present but empty. Returns the project and the canonical `devsrc` path.
+fn dev_project() -> (assert_fs::TempDir, std::path::PathBuf) {
+    let json = r#"{
+        "dependencies": [
+            {"name": "devlib", "type": "dev", "path": "devsrc"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+    temp.child("devsrc").create_dir_all().unwrap();
+    temp.child(".haxelib/devlib").create_dir_all().unwrap();
+    let target = temp.child("devsrc").path().canonicalize().unwrap();
+    (temp, target)
+}
+
+#[test]
+fn check_dev_dep_pointing_at_path_passes() {
+    let (temp, target) = dev_project();
+    // haxelib 4.2.0 writes `.dev` with a trailing slash; that is the same path.
+    let dev = format!("{}/", target.display());
+    temp.child(".haxelib/devlib/.dev").write_str(&dev).unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("is not").not());
+}
+
+/// Regression: a `.current` left by an earlier haxelib install of the same lib
+/// counted as an installed dev dep, although `haxelib path` resolves the
+/// version dir instead of the dev path.
+#[test]
+fn check_dev_dep_with_only_current_is_missing() {
+    let (temp, _target) = dev_project();
+    temp.child(".haxelib/devlib/.current")
+        .write_str("1.0.0")
+        .unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("is not installed"))
+        .stdout(predicate::str::contains("devsrc"));
+}
+
+#[test]
+fn check_dev_dep_pointing_elsewhere_is_outdated() {
+    let (temp, _target) = dev_project();
+    temp.child(".haxelib/devlib/.dev")
+        .write_str("/somewhere/else")
+        .unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("is not at the correct version"))
+        .stdout(predicate::str::contains("/somewhere/else"));
+}
+
+#[test]
+fn check_dev_dep_with_missing_target_fails() {
+    let (temp, target) = dev_project();
+    temp.child(".haxelib/devlib/.dev")
+        .write_str(target.to_str().unwrap())
+        .unwrap();
+    std::fs::remove_dir(&target).unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("is not installed"));
 }
 
 // --- dotted library names (`funkin.vis`-style) ---

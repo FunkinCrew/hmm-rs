@@ -630,6 +630,149 @@ fn install_git_dep_dropping_dir_clears_dev_link() {
     dev_file.assert(predicate::path::missing());
 }
 
+// --- dev deps ---
+
+/// Regression: dev entries printed "Installing from Dev not yet implemented"
+/// and left no `.dev` marker behind.
+#[test]
+fn install_dev_dep_writes_dev_marker() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "devinst-a", "type": "dev", "path": "devsrc"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+    temp.child("devsrc").create_dir_all().unwrap();
+    let target = temp.child("devsrc").path().canonicalize().unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("development directory set to"))
+        .stdout(predicate::str::contains("not yet implemented").not());
+
+    let dev = std::fs::read_to_string(temp.child(".haxelib/devinst-a/.dev").path()).unwrap();
+    assert_eq!(dev, target.to_str().unwrap());
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success();
+}
+
+/// A dev dep whose `path` changed in hmm.json, or that replaced a haxelib
+/// install of the same lib, gets its `.dev` marker (re)written.
+#[test]
+fn install_dev_dep_repoints_stale_marker_and_haxelib_install() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "devinst-b", "type": "dev", "path": "devsrc"},
+            {"name": "devinst-c", "type": "dev", "path": "devsrc"}
+        ]
+    }"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("devinst-c", "1.0.0")]);
+    temp.child("devsrc").create_dir_all().unwrap();
+    temp.child(".haxelib/devinst-b/.dev")
+        .write_str("/somewhere/else")
+        .unwrap();
+    let target = temp.child("devsrc").path().canonicalize().unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success();
+
+    for name in ["devinst-b", "devinst-c"] {
+        let dev_file = temp.child(format!(".haxelib/{name}/.dev"));
+        let dev = std::fs::read_to_string(dev_file.path()).unwrap();
+        assert_eq!(dev, target.to_str().unwrap(), "{name}");
+    }
+}
+
+#[test]
+fn install_dev_dep_with_missing_target_fails() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "devinst-d", "type": "dev", "path": "nope"}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(r#"dev path "nope" not found"#));
+    temp.child(".haxelib/devinst-d/.dev")
+        .assert(predicate::path::missing());
+}
+
+// --- version-less haxelib deps ---
+
+/// Regression: a haxelib dep with no version failed with "version required".
+/// It now installs the registry's latest and pins it, like `hmm-rs haxelib <name>`.
+#[test]
+fn install_versionless_haxelib_installs_latest_and_pins_it() {
+    let stub = common::RegistryStub::serve(&[("latest-a", "2.0.0")]);
+    let json = r#"{
+        "dependencies": [
+            {"name": "latest-a", "type": "haxelib", "version": null}
+        ]
+    }"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Latest version of latest-a is 2.0.0",
+        ));
+
+    let current = std::fs::read_to_string(temp.child(".haxelib/latest-a/.current").path()).unwrap();
+    assert_eq!(current, "2.0.0");
+    let hmm_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(temp.child("hmm.json").path()).unwrap())
+            .unwrap();
+    assert_eq!(hmm_json["dependencies"][0]["version"], "2.0.0");
+}
+
+/// An unpinned lib that is already installed is left alone: no registry
+/// query, no reinstall, no hmm.json change.
+#[test]
+fn install_leaves_installed_versionless_haxelib_alone() {
+    // The stub knows no libs, so any registry query would fail the install.
+    let stub = common::RegistryStub::serve(&[]);
+    let json = r#"{"dependencies":[{"name":"latest-b","type":"haxelib","version":null}]}"#;
+    let temp = common::project_with_installed_haxelibs(json, &[("latest-b", "1.0.0")]);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Not implemented").not());
+
+    let current = std::fs::read_to_string(temp.child(".haxelib/latest-b/.current").path()).unwrap();
+    assert_eq!(current, "1.0.0");
+    let hmm_json = std::fs::read_to_string(temp.child("hmm.json").path()).unwrap();
+    assert_eq!(hmm_json, json);
+}
+
 // `.haxelib/.repo-version` is haxelib 4.2.0's repository format marker. A
 // missing marker makes every haxelib command nag about `haxelib fixrepo`, and
 // running fixrepo would lowercase hmm-rs's exact-case lib dirs, so hmm-rs

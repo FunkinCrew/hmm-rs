@@ -75,43 +75,45 @@ pub fn install_haxelibs(specs: &[String], json_path: PathBuf) -> Result<()> {
 }
 
 fn build_haxelib_install(name: &str, version: Option<&str>) -> Result<Haxelib> {
-    let mut haxelib_install = Haxelib {
+    let version = match version {
+        Some(v) => v.to_string(),
+        None => resolve_latest_version(name)?,
+    };
+    Ok(Haxelib {
         name: name.to_string(),
         haxelib_type: HaxelibType::Haxelib,
         vcs_ref: None,
         dir: None,
         path: None,
         url: None,
-        version: None,
-    };
-    match version {
-        Some(v) => haxelib_install.version = Some(v.to_string()),
-        None => {
-            // we need to query the latest version from haxelib
-            // haxelib url: lib.haxe.org/api/3.0/index.n/
-            // needs X-Haxe-Remoting header
-            // and __x param with the query
-            // in __x param, we can query with something like
-            // ay3:apiy16:getLatestVersionhay4:limeh
-            let serialized = format!("ay3:apiy16:getLatestVersionhay{}:{}h", name.len(), name);
-            let client = Client::new();
+        version: Some(version),
+    })
+}
 
-            let url = format!(
-                "{}/api/3.0/index.n/?__x={}",
-                crate::hmm::haxelib::registry_base_url(),
-                urlencoding::encode(&serialized)
-            );
-            let resp = client.get(&url).header("X-Haxe-Remoting", "1").send()?;
+/// Asks the registry for the latest version of `name`.
+pub fn resolve_latest_version(name: &str) -> Result<String> {
+    // we need to query the latest version from haxelib
+    // haxelib url: lib.haxe.org/api/3.0/index.n/
+    // needs X-Haxe-Remoting header
+    // and __x param with the query
+    // in __x param, we can query with something like
+    // ay3:apiy16:getLatestVersionhay4:limeh
+    let serialized = format!("ay3:apiy16:getLatestVersionhay{}:{}h", name.len(), name);
+    let client = Client::new();
 
-            let resp = resp.text()?;
-            let decoded_resp = parse_remoting_response(&resp, name)?;
+    let url = format!(
+        "{}/api/3.0/index.n/?__x={}",
+        crate::hmm::haxelib::registry_base_url(),
+        urlencoding::encode(&serialized)
+    );
+    let resp = client.get(&url).header("X-Haxe-Remoting", "1").send()?;
 
-            println!("Latest version of {} is {}", name, decoded_resp);
+    let resp = resp.text()?;
+    let decoded_resp = parse_remoting_response(&resp, name)?;
 
-            haxelib_install.version = Some(decoded_resp);
-        }
-    };
-    Ok(haxelib_install)
+    println!("Latest version of {} is {}", name, decoded_resp);
+
+    Ok(decoded_resp)
 }
 
 #[cfg(test)]

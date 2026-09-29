@@ -52,7 +52,7 @@ enum Commands {
         #[command(flatten)]
         filter: LibraryFilter,
     },
-    /// Creates an empty .haxelib/ folder, and an empty hmm.json file
+    /// Creates a .haxelib/ folder and an empty hmm.json file, leaving either alone if it already exists
     Init,
     /// Removes local .haxelib directory, useful for full clean reinstalls
     #[command(visible_alias = "cl")]
@@ -211,6 +211,7 @@ pub fn run() -> Result<()> {
             &load_deps()?,
             &filter.lib,
             &remote_separator,
+            &path,
         )?,
         Commands::Haxelib { names } => commands::haxelib_command::install_haxelibs(&names, path)?,
         Commands::Git {
