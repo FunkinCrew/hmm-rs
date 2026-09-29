@@ -278,6 +278,138 @@ fn install_continues_past_bad_git_ref() {
         .assert(predicate::path::is_file());
 }
 
+/// Regression (H8): bumping a git dep's ref to a tag created upstream after
+/// the clone aborted `install` before anything was fetched, and every other
+/// dep was skipped with it. The tag (annotated here) is fetched and checked
+/// out, and the missing dep listed before it still installs.
+#[test]
+fn install_fetches_tag_created_upstream_after_clone() {
+    let (_repo_a, repo_a_path) = common::local_git_repo_with_lib_subdir("liba");
+    let (_repo_b, repo_b_path) = common::local_git_repo_with_lib_subdir("libb");
+    let url_a = common::file_url(&repo_a_path);
+    let url_b = common::file_url(&repo_b_path);
+    let temp = common::project_with_hmm_json(&format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "newtag-b", "type": "git", "ref": "main", "url": "{url_b}"}}
+        ]
+    }}"#
+    ));
+    let hmm = || {
+        let mut cmd = Command::cargo_bin("hmm-rs").unwrap();
+        cmd.current_dir(temp.path());
+        cmd
+    };
+    hmm().arg("install").assert().success();
+
+    std::fs::write(repo_b_path.join("second.txt"), "second\n").unwrap();
+    common::run_git(&repo_b_path, &["add", "-A"]);
+    common::run_git(&repo_b_path, &["commit", "-qm", "second"]);
+    common::run_git(&repo_b_path, &["tag", "-a", "v2", "-m", "v2"]);
+    std::fs::write(
+        temp.child("hmm.json").path(),
+        format!(
+            r#"{{
+        "dependencies": [
+            {{"name": "newtag-a", "type": "git", "ref": "main", "url": "{url_a}"}},
+            {{"name": "newtag-b", "type": "git", "ref": "v2", "url": "{url_b}"}}
+        ]
+    }}"#
+        ),
+    )
+    .unwrap();
+
+    hmm().arg("install").assert().success();
+    temp.child(".haxelib/newtag-a/git/README.md")
+        .assert(predicate::path::is_file());
+    assert_eq!(
+        common::git_rev_parse(&temp.path().join(".haxelib/newtag-b/git"), "HEAD"),
+        common::git_rev_parse(&repo_b_path, "v2^{commit}")
+    );
+    hmm().arg("check").assert().success();
+}
+
+/// Regression (H8): the same for a branch that only exists upstream.
+#[test]
+fn install_checks_out_branch_created_upstream_after_clone() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let url = common::file_url(&repo_path);
+    let json = |r: &str| {
+        format!(
+            r#"{{
+        "dependencies": [
+            {{"name": "newbranch", "type": "git", "ref": "{r}", "url": "{url}"}}
+        ]
+    }}"#
+        )
+    };
+    let temp = common::project_with_hmm_json(&json("main"));
+    let hmm = || {
+        let mut cmd = Command::cargo_bin("hmm-rs").unwrap();
+        cmd.current_dir(temp.path());
+        cmd
+    };
+    hmm().arg("install").assert().success();
+
+    common::run_git(&repo_path, &["checkout", "-qb", "feature"]);
+    std::fs::write(repo_path.join("feature.txt"), "feature\n").unwrap();
+    common::run_git(&repo_path, &["add", "-A"]);
+    common::run_git(&repo_path, &["commit", "-qm", "feature"]);
+    std::fs::write(temp.child("hmm.json").path(), json("feature")).unwrap();
+
+    hmm().arg("install").assert().success();
+    assert_eq!(
+        common::git_rev_parse(&temp.path().join(".haxelib/newbranch/git"), "HEAD"),
+        common::git_rev_parse(&repo_path, "feature")
+    );
+    hmm().arg("check").assert().success();
+}
+
+/// A lib that can't be checked at all (here a cloned git dep with no `ref`)
+/// fails on its own and the deps after it still install.
+#[test]
+fn install_continues_past_uncheckable_dep() {
+    let (_repo_a, repo_a_path) = common::local_git_repo_with_lib_subdir("liba");
+    let (_repo_b, repo_b_path) = common::local_git_repo_with_lib_subdir("libb");
+    let url_a = common::file_url(&repo_a_path);
+    let url_b = common::file_url(&repo_b_path);
+    let temp = common::project_with_hmm_json(&format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "uncheck-a", "type": "git", "url": "{url_a}"}}
+        ]
+    }}"#
+    ));
+    let install = || {
+        let mut cmd = Command::cargo_bin("hmm-rs").unwrap();
+        cmd.current_dir(temp.path()).arg("install");
+        cmd
+    };
+    install().assert().success();
+
+    std::fs::write(
+        temp.child("hmm.json").path(),
+        format!(
+            r#"{{
+        "dependencies": [
+            {{"name": "uncheck-a", "type": "git", "url": "{url_a}"}},
+            {{"name": "uncheck-b", "type": "git", "ref": "main", "url": "{url_b}"}}
+        ]
+    }}"#
+        ),
+    )
+    .unwrap();
+
+    install()
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("could not be checked"))
+        .stdout(predicate::str::contains("'ref' field is required"))
+        .stdout(predicate::str::contains("dependencies failed to install:"));
+    temp.child(".haxelib/uncheck-b/git/README.md")
+        .assert(predicate::path::is_file());
+}
+
 /// A haxelib dep whose download fails must not abort the run either.
 #[test]
 fn install_continues_past_failed_haxelib_download() {

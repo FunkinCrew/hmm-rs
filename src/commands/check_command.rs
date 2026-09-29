@@ -4,7 +4,6 @@ use crate::hmm::dependencies::Dependancies;
 use crate::hmm::haxelib::{Haxelib, HaxelibType};
 use anyhow::{anyhow, Context, Result};
 use console::Emoji;
-use gix::hash::Prefix;
 use owo_colors::OwoColorize;
 use std::io::Read;
 use std::path::Path;
@@ -27,6 +26,8 @@ pub enum InstallType {
     AlreadyInstalled, // Correctly installed
     Conflict,     // Version conflicts between dependencies
     NotLocked,    // Version in hmm.json isn't locked to anything, prompt to lock?
+    // The check itself errored; this lib fails without aborting the rest
+    CheckFailed(String),
 }
 
 impl InstallType {
@@ -100,7 +101,15 @@ pub fn compare_haxelib_to_hmm<'a>(
             );
         }
 
-        let haxelib_status = check_dependency(haxelib)?;
+        // One lib that can't be checked must not hide the state of the others.
+        let haxelib_status = check_dependency(haxelib).unwrap_or_else(|e| {
+            HaxelibStatus::new(
+                haxelib,
+                InstallType::CheckFailed(format!("{e:#}")),
+                get_wants(haxelib),
+                None,
+            )
+        });
 
         if verbose {
             // clear the "Checking ..." progress line, then show the result
@@ -206,43 +215,44 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
                 .head_commit()
                 .context("could not read HEAD — repo may be empty or corrupt")?;
 
-            // If our head ref is a tag or branch, we check if we already have it in our history
-            // If it's not a tag, we check via commit id
             let vcs_ref = haxelib
                 .vcs_ref
                 .as_ref()
-                .ok_or_else(|| anyhow!("{}: 'ref' field is required for git type", haxelib.name))?;
-            let intended_commit = match repo.find_reference(vcs_ref) {
-                Ok(r) => r.id().shorten_or_id(),
-                Err(_) => Prefix::from_hex(vcs_ref)?,
+                .ok_or_else(|| anyhow!("'ref' field is required for git type"))?;
+            // Resolved like `git rev-parse <ref>^{commit}` in the local clone:
+            // branches, tags (annotated ones peeled), `HEAD`, `main~1`, short
+            // SHAs. A ref the clone doesn't have yet (a tag or branch created
+            // upstream after the clone) can't match, so install fetches it.
+            let intended_commit = repo
+                .rev_parse_single(vcs_ref.as_str())
+                .ok()
+                .and_then(|id| id.object().ok()?.peel_to_commit().ok());
+            let mismatch = match intended_commit {
+                Some(c) if c.id == head_ref.id => None,
+                Some(_) => Some("wrong commit"),
+                None => Some("ref not found locally"),
             };
-
-            let is_wrong_commit = head_ref
-                .id()
-                .shorten_or_id()
-                .cmp_oid(intended_commit.as_oid())
-                .is_ne();
 
             let has_local_changes = repo.is_dirty()?;
 
-            match (is_wrong_commit, has_local_changes) {
-                (true, true) => {
+            match (mismatch, has_local_changes) {
+                (Some(mismatch), true) => {
                     return Ok(HaxelibStatus::new(
                         haxelib,
                         InstallType::Conflict,
                         get_wants(haxelib),
-                        Some(format!("{} (wrong commit + local changes)", head_ref.id())),
+                        Some(format!("{} ({mismatch} + local changes)", head_ref.id())),
                     ));
                 }
-                (true, false) => {
+                (Some(mismatch), false) => {
                     return Ok(HaxelibStatus::new(
                         haxelib,
                         InstallType::Outdated,
                         get_wants(haxelib),
-                        Some(format!("{} (wrong commit)", head_ref.id())),
+                        Some(format!("{} ({mismatch})", head_ref.id())),
                     ));
                 }
-                (false, true) => {
+                (None, true) => {
                     return Ok(HaxelibStatus::new(
                         haxelib,
                         InstallType::Conflict,
@@ -250,7 +260,7 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
                         Some(format!("{} (local changes)", head_ref.id())),
                     ));
                 }
-                (false, false) => {
+                (None, false) => {
                     // Continue to the end of the function - correct version
                 }
             }
@@ -348,7 +358,7 @@ fn check_dev_dependency<'a>(haxelib: &'a Haxelib, lib_path: &Path) -> HaxelibSta
 }
 
 fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
-    match haxelib_status.install_type {
+    match &haxelib_status.install_type {
         InstallType::Missing => {
             println!(
                 "{} {}",
@@ -434,6 +444,14 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             if let Some(expected) = &haxelib_status.wants {
                 println!("Expected: {}", expected.red());
             }
+        }
+        InstallType::CheckFailed(err) => {
+            println!(
+                "{} {} {}",
+                haxelib_status.lib.name.red().bold(),
+                "could not be checked:".red(),
+                err.red()
+            );
         }
         InstallType::NotLocked => {
             println!(

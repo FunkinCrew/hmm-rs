@@ -347,6 +347,128 @@ fn check_git_detects_stale_dev_link() {
         .stdout(predicate::str::contains("has a stale dev link"));
 }
 
+/// Rewrites the project's hmm.json: `gitlib`'s ref becomes `new_ref` (removed
+/// when `None`) and a missing haxelib dep `lib-after` is appended after it.
+fn set_gitlib_ref_with_sibling(temp: &assert_fs::TempDir, new_ref: Option<&str>) {
+    let path = temp.path().join("hmm.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let deps = json["dependencies"].as_array_mut().unwrap();
+    match new_ref {
+        Some(r) => deps[0]["ref"] = r.into(),
+        None => {
+            deps[0].as_object_mut().unwrap().remove("ref");
+        }
+    }
+    deps.push(serde_json::json!({"name": "lib-after", "type": "haxelib", "version": "1.0.0"}));
+    std::fs::write(&path, json.to_string()).unwrap();
+}
+
+/// Regression (H8): a ref the clone doesn't have (a tag or branch created
+/// upstream after the clone) aborted the whole run with a bare gix error.
+/// It is that lib's "wrong version", and the deps after it are still checked.
+#[test]
+fn check_git_ref_missing_locally_fails_that_lib_only() {
+    let (_repo, temp, _first_sha) = installed_git_project();
+    set_gitlib_ref_with_sibling(&temp, Some("v2"));
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("is not at the correct version"))
+        .stdout(predicate::str::contains("(ref not found locally)"))
+        .stdout(predicate::str::contains("lib-after"))
+        .stderr(predicate::str::contains("gitlib, lib-after"));
+}
+
+/// Regression (H8): `ref: HEAD` panicked inside gix (symbolic ref).
+#[test]
+fn check_git_ref_head_passes() {
+    let (_repo, temp, _first_sha) = installed_git_project();
+    let path = temp.path().join("hmm.json");
+    let json = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, json.replace(r#""ref": "main""#, r#""ref": "HEAD""#)).unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success();
+}
+
+/// Refs resolve like `git rev-parse`: revision expressions and any unambiguous
+/// short SHA pass, and a SHA is compared in full, not over gix's abbreviation.
+#[test]
+fn check_git_ref_resolves_like_rev_parse() {
+    let (_repo, temp, first_sha) = installed_git_project();
+    let clone = temp.path().join(".haxelib/gitlib/git");
+    common::run_git(&clone, &["checkout", "-q", &first_sha]);
+    let path = temp.path().join("hmm.json");
+    let json = std::fs::read_to_string(&path).unwrap();
+    let check_with_ref = |r: &str| {
+        std::fs::write(
+            &path,
+            json.replace(r#""ref": "main""#, &format!(r#""ref": "{r}""#)),
+        )
+        .unwrap();
+        let mut cmd = Command::cargo_bin("hmm-rs").unwrap();
+        cmd.current_dir(temp.path()).arg("check");
+        cmd
+    };
+
+    for good in ["main~1", &first_sha[..5], &first_sha] {
+        check_with_ref(good).assert().success();
+    }
+
+    // Right first 39 digits, wrong last one: used to pass.
+    let last = if first_sha.ends_with('0') { "1" } else { "0" };
+    let wrong_tail = format!("{}{last}", &first_sha[..39]);
+    check_with_ref(&wrong_tail).assert().failure();
+}
+
+/// Regression: an annotated tag's ref named the tag object, never HEAD's
+/// commit, so a checkout exactly at the tag was reported as the wrong commit.
+#[test]
+fn check_git_annotated_tag_passes() {
+    let (_repo, temp, _first_sha) = installed_git_project();
+    let clone = temp.path().join(".haxelib/gitlib/git");
+    common::run_git(&clone, &["tag", "-a", "v1", "-m", "v1"]);
+    let path = temp.path().join("hmm.json");
+    let json = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, json.replace(r#""ref": "main""#, r#""ref": "v1""#)).unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .success();
+}
+
+/// A lib that can't be checked at all (here a cloned git dep with no `ref`)
+/// is reported under its own name and fails the run without skipping the
+/// deps after it.
+#[test]
+fn check_uncheckable_dep_fails_that_lib_only() {
+    let (_repo, temp, _first_sha) = installed_git_project();
+    set_gitlib_ref_with_sibling(&temp, None);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("could not be checked"))
+        .stdout(predicate::str::contains("'ref' field is required"))
+        .stdout(predicate::str::contains("lib-after"))
+        .stderr(predicate::str::contains("gitlib, lib-after"));
+}
+
 #[test]
 fn check_unknown_lib_warns() {
     let json = r#"{

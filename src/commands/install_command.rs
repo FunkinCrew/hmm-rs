@@ -378,6 +378,7 @@ pub fn install_from_hmm(
                 // Handle git conflicts interactively
                 handle_git_conflict(install_status, separator, counter)
             }
+            InstallType::CheckFailed(err) => Err(anyhow!("{err}")),
             // filtered out of `pending` above
             InstallType::AlreadyInstalled | InstallType::NotLocked => Ok(()),
         };
