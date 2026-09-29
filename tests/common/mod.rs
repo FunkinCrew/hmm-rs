@@ -123,8 +123,8 @@ pub fn file_url(path: &std::path::Path) -> String {
 /// Serves:
 /// - `GET /p/<name>/<version>/download` — a zip with a minimal haxelib.json for
 ///   known (name, version) pairs, HTTP 404 otherwise
-/// - `GET /api/3.0/index.n/?__x=...` — a Haxe-remoting `getLatestVersion` reply
-///   for known names, a "No such Project" reply otherwise
+/// - `GET /api/3.0/index.n/?__x=...`: a Haxe-remoting `infos` reply listing
+///   every version served for the name, a "No such Project" exception otherwise
 ///
 /// Use a unique library name per test: downloads land in the shared OS temp dir
 /// as `<name>.zip`, so parallel tests using the same name would race.
@@ -178,19 +178,43 @@ fn route(url: &str, libs: &[(String, String)]) -> tiny_http::Response<std::io::C
         return tiny_http::Response::from_data(b"not found".to_vec()).with_status_code(404);
     }
     if path.starts_with("/api/3.0/index.n") {
-        // The remoting query serializes the library name inside `__x`; the stub just
-        // matches on the name appearing anywhere in the (unreserved-char) query.
-        for (n, v) in libs {
-            if url.contains(n.as_str()) {
-                let body = format!("hxry{}:{}", v.len(), v);
-                return tiny_http::Response::from_data(body.into_bytes());
+        let call = url
+            .split_once("__x=")
+            .map(|(_, x)| urlencoding::decode(x).unwrap().into_owned())
+            .unwrap_or_default();
+        if let Some(name) = infos_call_name(&call) {
+            let versions: Vec<&str> = libs
+                .iter()
+                .filter(|(n, _)| *n == name)
+                .map(|(_, v)| v.as_str())
+                .collect();
+            if !versions.is_empty() {
+                return tiny_http::Response::from_data(infos_reply(name, &versions).into_bytes());
             }
         }
         let msg = "No%20such%20Project";
-        let body = format!("hxry{}:{}", msg.len(), msg);
+        let body = format!("hxrxy{}:{}", msg.len(), msg);
         return tiny_http::Response::from_data(body.into_bytes());
     }
     tiny_http::Response::from_data(b"bad request".to_vec()).with_status_code(404)
+}
+
+/// The library name from a serialized `api.infos(name)` remoting call.
+fn infos_call_name(call: &str) -> Option<&str> {
+    let rest = call.strip_prefix("ay3:apiy5:infoshay")?;
+    let (len, rest) = rest.split_once(':')?;
+    rest.get(..len.parse().ok()?)
+}
+
+/// A Haxe-serialized `infos` reply shaped like lib.haxe.org's: every string is
+/// cached as it is first written, so later `name` keys are the back-reference
+/// `R0`. Names and versions here are unreserved chars, so need no URL-encoding.
+fn infos_reply(name: &str, versions: &[&str]) -> String {
+    let mut body = format!("hxroy4:namey{}:{}y8:versionsa", name.len(), name);
+    for v in versions {
+        body += &format!("oR0y{}:{}g", v.len(), v);
+    }
+    body + "hg"
 }
 
 /// Builds an in-memory zip shaped like a haxelib release archive.

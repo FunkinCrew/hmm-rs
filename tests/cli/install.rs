@@ -881,6 +881,35 @@ fn install_versionless_haxelib_installs_latest_and_pins_it() {
     assert_eq!(hmm_json["dependencies"][0]["version"], "2.0.0");
 }
 
+/// Regression: a version-less entry was pinned to the registry's
+/// `getLatestVersion`, which returns a newer prerelease over an older stable.
+#[test]
+fn install_versionless_haxelib_pins_newest_stable_over_newer_prerelease() {
+    let stub = common::RegistryStub::serve(&[
+        ("latest-pre", "1.0.0"),
+        ("latest-pre", "2.0.0"),
+        ("latest-pre", "3.0.0-rc.1"),
+    ]);
+    let json = r#"{"dependencies":[{"name":"latest-pre","type":"haxelib","version":null}]}"#;
+    let temp = common::project_with_hmm_json(json);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .arg("install")
+        .assert()
+        .success();
+
+    let current =
+        std::fs::read_to_string(temp.child(".haxelib/latest-pre/.current").path()).unwrap();
+    assert_eq!(current, "2.0.0");
+    let hmm_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(temp.child("hmm.json").path()).unwrap())
+            .unwrap();
+    assert_eq!(hmm_json["dependencies"][0]["version"], "2.0.0");
+}
+
 /// An unpinned lib that is already installed is left alone: no registry
 /// query, no reinstall, no hmm.json change.
 #[test]

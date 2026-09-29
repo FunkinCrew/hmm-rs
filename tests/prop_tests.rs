@@ -4,7 +4,7 @@
 //! targets go deeper but need nightly and an explicit run; these run on stable
 //! in every `cargo test`, so the invariants are enforced on every PR.
 
-use hmm_rs::commands::haxelib_command::{parse_remoting_response, parse_spec};
+use hmm_rs::commands::haxelib_command::{parse_infos_versions, parse_spec, pick_latest_version};
 use hmm_rs::commands::init_command::{parse_repo_version, REPO_VERSION};
 use hmm_rs::commands::install_command::{parse_git_progress, sanitize_zip_entry, GitProgress};
 use hmm_rs::commands::tohxml_command::render_hxml;
@@ -94,6 +94,40 @@ fn well_formed_haxelib() -> impl Strategy<Value = Haxelib> {
             vcs_ref: Some(vcs_ref),
             haxelib_type,
         })
+}
+
+/// A registry version with the key haxelib's `SemVer.compare` orders it by:
+/// (major, minor, patch, prerelease tag index or `u8::MAX` for a release,
+/// prerelease number). Two-digit parts catch a lexicographic compare.
+fn registry_version() -> impl Strategy<Value = ((u64, u64, u64, u8, Option<u64>), String)> {
+    const TAGS: [&str; 4] = ["alpha", "beta", "rc", "preview"];
+    let preview = prop::option::of((0u8..4, prop::option::of(0u64..12)));
+    (0u64..12, 0u64..12, 0u64..12, preview).prop_map(|(major, minor, patch, preview)| {
+        let release = format!("{major}.{minor}.{patch}");
+        match preview {
+            None => ((major, minor, patch, u8::MAX, None), release),
+            Some((tag, num)) => {
+                let mut text = format!("{release}-{}", TAGS[tag as usize]);
+                if let Some(n) = num {
+                    text += &format!(".{n}");
+                }
+                ((major, minor, patch, tag, num), text)
+            }
+        }
+    })
+}
+
+/// Writes `s` the way `haxe.Serializer` does: a repeat of an earlier string is
+/// the back-reference `R<n>`.
+fn haxe_string(out: &mut String, cache: &mut Vec<String>, s: &str) {
+    match cache.iter().position(|c| c == s) {
+        Some(i) => *out += &format!("R{i}"),
+        None => {
+            let encoded = urlencoding::encode(s);
+            *out += &format!("y{}:{}", encoded.len(), encoded);
+            cache.push(s.to_string());
+        }
+    }
 }
 
 proptest! {
@@ -250,11 +284,54 @@ proptest! {
     /// covers the char-boundary slice that used to blow up on long non-ASCII
     /// error pages.
     #[test]
-    fn remoting_response_never_panics(
-        resp in prop_oneof!["\\PC{0,300}", "€{0,300}", "[a-z:%0-9]{0,64}"],
-        name in "[a-z]{0,12}",
+    fn infos_reply_never_panics(
+        resp in prop_oneof!["\\PC{0,300}", "€{0,300}", "hxr[a-zR0-9:%]{0,64}"],
     ) {
-        let _ = parse_remoting_response(&resp, &name);
+        let _ = parse_infos_versions(&resp, "lib");
+    }
+
+    /// A reply shaped like lib.haxe.org's `infos` decodes to exactly the
+    /// version names it lists, including names that arrive as back-references
+    /// to an earlier key, comment or version.
+    #[test]
+    fn infos_reply_round_trips_version_names(
+        releases in proptest::collection::vec(
+            (
+                prop_oneof!["[0-9.]{0,4}", "\\PC{0,6}", Just("name".to_string())],
+                prop_oneof!["[0-9.]{0,4}", Just("comments".to_string())],
+            ),
+            0..8,
+        )
+    ) {
+        let mut reply = String::from("hxro");
+        let mut cache = Vec::new();
+        haxe_string(&mut reply, &mut cache, "versions");
+        reply += "a";
+        for (name, comments) in &releases {
+            reply += "o";
+            for (key, value) in [("comments", comments), ("name", name)] {
+                haxe_string(&mut reply, &mut cache, key);
+                haxe_string(&mut reply, &mut cache, value);
+            }
+            haxe_string(&mut reply, &mut cache, "downloads");
+            reply += "i42g";
+        }
+        reply += "hg";
+        let expected: Vec<String> = releases.into_iter().map(|(name, _)| name).collect();
+        prop_assert_eq!(parse_infos_versions(&reply, "lib").unwrap(), expected);
+    }
+
+    /// haxelib installs the newest release, and the newest prerelease only
+    /// when no release exists.
+    #[test]
+    fn pick_latest_version_matches_haxelib_rule(
+        versions in proptest::collection::vec(registry_version(), 1..8)
+    ) {
+        let names: Vec<String> = versions.iter().map(|(_, v)| v.clone()).collect();
+        let releases: Vec<_> = versions.iter().filter(|(key, _)| key.3 == u8::MAX).collect();
+        let pool = if releases.is_empty() { versions.iter().collect() } else { releases };
+        let expected = &pool.iter().max_by_key(|(key, _)| *key).unwrap().1;
+        prop_assert_eq!(pick_latest_version(&names).unwrap(), Some(expected.as_str()));
     }
 
     /// hxml is line-oriented: exactly one `-lib` directive per dependency.

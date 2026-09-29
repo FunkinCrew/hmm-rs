@@ -53,6 +53,57 @@ fn haxelib_without_version_queries_latest() {
     assert_eq!(current, "2.0.0");
 }
 
+/// Regression: the registry's `getLatestVersion` ranks a prerelease of a
+/// higher x.y.z above an older stable, so hmm-rs pinned `3.0.0-rc.1`.
+/// `haxelib install` picks the newest stable release instead.
+#[test]
+fn haxelib_without_version_prefers_newest_stable_over_newer_prerelease() {
+    let stub = common::RegistryStub::serve(&[
+        ("regstub-pre", "1.0.0"),
+        ("regstub-pre", "2.0.0"),
+        ("regstub-pre", "3.0.0-rc.1"),
+    ]);
+    let temp = common::initialized_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .args(["haxelib", "regstub-pre"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Latest version of regstub-pre is 2.0.0"));
+
+    let current =
+        std::fs::read_to_string(temp.child(".haxelib/regstub-pre/.current").path()).unwrap();
+    assert_eq!(current, "2.0.0");
+    let json_content = std::fs::read_to_string(temp.child("hmm.json").path()).unwrap();
+    assert!(json_content.contains("\"version\": \"2.0.0\""));
+}
+
+/// With no stable release at all, haxelib falls back to the newest prerelease.
+#[test]
+fn haxelib_without_version_falls_back_to_newest_prerelease() {
+    let stub = common::RegistryStub::serve(&[
+        ("regstub-rc", "1.0.0-rc.2"),
+        ("regstub-rc", "1.0.0-beta.1"),
+        ("regstub-rc", "1.0.0-rc.10"),
+        ("regstub-rc", "1.0.0-alpha"),
+    ]);
+    let temp = common::initialized_project();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .args(["haxelib", "regstub-rc"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Latest version of regstub-rc is 1.0.0-rc.10",
+        ));
+}
+
 #[test]
 fn haxelib_unknown_lib_fails_on_latest_query() {
     let stub = common::RegistryStub::serve(&[]);
@@ -95,7 +146,7 @@ fn haxelib_no_args_errors() {
 
 // --- dotted library names (`funkin.vis`-style) ---
 // The registry is queried with the RAW dotted name (both the /p/ download
-// route and the remoting getLatestVersion call); only the on-disk dirs use
+// route and the remoting infos call); only the on-disk dirs use
 // the comma encoding.
 
 #[test]
