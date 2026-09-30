@@ -53,18 +53,21 @@ fuzz_target!(|libs: Vec<FuzzLib>| {
         dependencies: libs.iter().map(to_haxelib).collect(),
     };
 
-    let Ok(hxml) = render_hxml(&deps) else {
-        return;
-    };
+    let hxml = render_hxml(&deps);
 
-    // hxml is line-oriented: one `-lib` directive per dependency. That only
-    // holds if no field smuggles a line break into the output, which is what
-    // `validate_lib_name` guarantees for names reaching this code for real.
+    // hxml is line-oriented: one `-lib` directive per dependency. Only the
+    // fields a line is built from may break it (`validate_lib_name` keeps line
+    // breaks out of real names): a haxelib dep's version, and the url and ref
+    // of a git dep without `dir`. A git dep with `dir` is a bare name, so a
+    // line break in its url or ref must not change the line count.
+    let clean = |s: &Option<String>| s.as_deref().is_none_or(|s| !has_line_break(s));
     let no_breaks = libs.iter().all(|l| {
         !has_line_break(&l.name)
-            && l.url.as_deref().is_none_or(|s| !has_line_break(s))
-            && l.vcs_ref.as_deref().is_none_or(|s| !has_line_break(s))
-            && l.version.as_deref().is_none_or(|s| !has_line_break(s))
+            && match l.haxelib_type {
+                FuzzType::Haxelib => clean(&l.version),
+                FuzzType::Git => l.dir.is_some() || (clean(&l.url) && clean(&l.vcs_ref)),
+                FuzzType::Dev | FuzzType::Mercurial => true,
+            }
     });
 
     if no_breaks {
@@ -73,8 +76,13 @@ fuzz_target!(|libs: Vec<FuzzLib>| {
             deps.dependencies.len(),
             "line count diverged from dependency count: {hxml:?}"
         );
-        for line in hxml.lines() {
+        for (lib, line) in libs.iter().zip(hxml.lines()) {
             assert!(line.starts_with("-lib "), "unexpected hxml line {line:?}");
+            // The bare name is the only form `haxelib path` resolves through
+            // `.dev`, which a git dep with `dir` relies on.
+            if matches!(lib.haxelib_type, FuzzType::Git) && lib.dir.is_some() {
+                assert_eq!(line, format!("-lib {}", lib.name), "git dep with dir must stay bare");
+            }
         }
     }
 });

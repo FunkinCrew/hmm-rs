@@ -335,17 +335,42 @@ proptest! {
     }
 
     /// hxml is line-oriented: exactly one `-lib` directive per dependency.
+    /// A haxelib dep carries `:<version>`; a git dep without `dir` carries
+    /// `:git:<url>#<ref>` so `haxelib install <file>.hxml` can clone it; a
+    /// git dep with `dir` and a dev dep are the bare name, the only form
+    /// `haxelib path` resolves through `.dev`.
     #[test]
     fn render_hxml_emits_one_line_per_dependency(
-        libs in proptest::collection::vec(well_formed_haxelib(), 0..8)
+        libs in proptest::collection::vec(
+            (well_formed_haxelib(), prop::option::of("[a-z]{1,6}")),
+            0..8,
+        )
     ) {
-        let count = libs.len();
+        let libs: Vec<Haxelib> = libs
+            .into_iter()
+            .map(|(mut lib, dir)| {
+                lib.dir = dir;
+                lib
+            })
+            .collect();
         let deps = Dependancies { dependencies: libs };
-        let hxml = render_hxml(&deps).unwrap();
+        let hxml = render_hxml(&deps);
 
-        prop_assert_eq!(hxml.lines().count(), count);
-        for line in hxml.lines() {
-            prop_assert!(line.starts_with("-lib "), "unexpected hxml line {:?}", line);
+        prop_assert_eq!(hxml.lines().count(), deps.dependencies.len());
+        for (lib, line) in deps.dependencies.iter().zip(hxml.lines()) {
+            let expected = match (&lib.haxelib_type, &lib.dir) {
+                (HaxelibType::Haxelib, _) => {
+                    format!("-lib {}:{}", lib.name, lib.version.as_deref().unwrap())
+                }
+                (HaxelibType::Git, None) => format!(
+                    "-lib {}:git:{}#{}",
+                    lib.name,
+                    lib.url.as_deref().unwrap(),
+                    lib.vcs_ref.as_deref().unwrap()
+                ),
+                _ => format!("-lib {}", lib.name),
+            };
+            prop_assert_eq!(line, expected);
         }
     }
 }
