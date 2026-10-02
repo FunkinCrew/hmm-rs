@@ -1107,3 +1107,81 @@ fn install_moves_exact_case_git_clone_to_lowercase_dir() {
         assert!(repo.join("GitMix").symlink_metadata().unwrap().is_symlink());
     }
 }
+
+// --- `.dev` redirects (a git worktree sharing another checkout's libs) ---
+
+/// A haxelib dep whose `.dev` points at a checkout of the pinned version is
+/// installed: install must neither download it nor drop the marker.
+#[test]
+fn install_keeps_haxelib_dev_redirect_at_pinned_version() {
+    let stub = common::RegistryStub::serve(&[]);
+    let json = r#"{
+        "dependencies": [
+            {"name": "redirinst-a", "type": "haxelib", "version": "1.3.0"}
+        ]
+    }"#;
+    let target = assert_fs::TempDir::new().unwrap();
+    target
+        .child("haxelib.json")
+        .write_str(r#"{"name": "redirinst-a", "version": "1.3.0"}"#)
+        .unwrap();
+    let temp = common::project_with_hmm_json(json);
+    let dev_file = temp.child(".haxelib/redirinst-a/.dev");
+    dev_file.write_str(target.path().to_str().unwrap()).unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("HMM_HAXELIB_URL", &stub.base_url)
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Downloading").not());
+    dev_file.assert(target.path().to_str().unwrap());
+}
+
+/// A git dep whose `.dev` points at another checkout on the wrong commit gets
+/// a clone of its own and loses the marker; the other checkout is untouched.
+#[test]
+fn install_replaces_git_dev_redirect_at_wrong_commit() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let first_sha = common::git_rev_parse(&repo_path, "HEAD");
+    std::fs::write(repo_path.join("second.txt"), "second\n").unwrap();
+    common::run_git(&repo_path, &["add", "-A"]);
+    common::run_git(&repo_path, &["commit", "-qm", "second"]);
+    let json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "redirinst-b", "type": "git", "ref": "main", "url": "{}"}}
+        ]
+    }}"#,
+        common::file_url(&repo_path)
+    );
+    let main = common::project_with_hmm_json(&json);
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(main.path())
+        .arg("install")
+        .assert()
+        .success();
+    let main_git = main.path().join(".haxelib/redirinst-b/git");
+    common::run_git(&main_git, &["checkout", "-q", &first_sha]);
+
+    let temp = common::project_with_hmm_json(&json);
+    let dev_file = temp.child(".haxelib/redirinst-b/.dev");
+    dev_file.write_str(main_git.to_str().unwrap()).unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("development directory unset"));
+    dev_file.assert(predicate::path::missing());
+    assert_eq!(
+        common::git_rev_parse(temp.child(".haxelib/redirinst-b/git").path(), "HEAD"),
+        common::git_rev_parse(&repo_path, "main")
+    );
+    assert_eq!(common::git_rev_parse(&main_git, "HEAD"), first_sha);
+}

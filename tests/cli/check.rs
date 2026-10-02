@@ -344,7 +344,9 @@ fn check_git_detects_stale_dev_link() {
         .arg("check")
         .assert()
         .failure()
-        .stdout(predicate::str::contains("has a stale dev link"));
+        .stdout(predicate::str::contains(
+            ".dev target is not a git checkout",
+        ));
 }
 
 /// Rewrites the project's hmm.json: `gitlib`'s ref becomes `new_ref` (removed
@@ -690,4 +692,146 @@ fn check_finds_mixed_case_lib_in_lowercase_dir() {
         .arg("check")
         .assert()
         .success();
+}
+
+// --- `.dev` redirects (a git worktree sharing another checkout's libs) ---
+
+/// A project with `json` as its hmm.json and only a `.dev` marker for `name`
+/// pointing at `target`, like a git worktree reusing the main checkout's libs.
+fn worktree_with_dev_redirect(
+    json: &str,
+    name: &str,
+    target: &std::path::Path,
+) -> assert_fs::TempDir {
+    let temp = common::project_with_hmm_json(json);
+    temp.child(format!(".haxelib/{name}/.dev"))
+        .write_str(target.to_str().unwrap())
+        .unwrap();
+    temp
+}
+
+/// Regression: a haxelib dep with a `.dev` marker always read as the wrong
+/// version, since the marker's path was compared to the hmm.json version.
+/// `haxelib path` reports the target's haxelib.json version, and resolves a
+/// relative marker against the cwd.
+#[test]
+fn check_haxelib_dev_redirect_uses_target_version() {
+    let json = r#"{
+        "dependencies": [
+            {"name": "redir-a", "type": "haxelib", "version": "1.3.0"}
+        ]
+    }"#;
+    let main = common::project_with_installed_haxelibs(json, &[("redir-a", "1.3.0")]);
+    main.child(".haxelib/redir-a/1,3,0/haxelib.json")
+        .write_str(r#"{"name": "redir-a", "version": "1.3.0"}"#)
+        .unwrap();
+    let relative = std::path::Path::new("..")
+        .join(main.path().file_name().unwrap())
+        .join(".haxelib/redir-a/1,3,0");
+    let worktree = worktree_with_dev_redirect(json, "redir-a", &relative);
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(worktree.path())
+        .arg("check")
+        .assert()
+        .success();
+
+    worktree
+        .child("hmm.json")
+        .write_str(&json.replace("1.3.0", "1.4.0"))
+        .unwrap();
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(worktree.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("is not at the correct version"))
+        .stdout(predicate::str::contains("1.3.0 (via .dev"));
+}
+
+/// A git dep's `.dev` can point at another project's clone instead of a clone
+/// of its own. It passes at the pinned commit, local changes there included:
+/// install never touches a checkout it doesn't own.
+#[test]
+fn check_git_dev_redirect_to_other_checkout() {
+    let (_repo, main, first_sha) = installed_git_project();
+    let main_git = main.path().join(".haxelib/gitlib/git");
+    let json = std::fs::read_to_string(main.path().join("hmm.json")).unwrap();
+    let worktree = worktree_with_dev_redirect(&json, "gitlib", &main_git);
+    std::fs::write(main_git.join("README.md"), "local edit\n").unwrap();
+
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(worktree.path())
+        .arg("check")
+        .assert()
+        .success();
+
+    common::run_git(&main_git, &["checkout", "-qf", &first_sha]);
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(worktree.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("wrong commit, via .dev"));
+}
+
+/// With `dir`, the `.dev` target must be that subdir of whichever checkout it
+/// points into. In the lib's own checkout a wrong target is only a stale link.
+#[test]
+fn check_git_dev_redirect_must_reach_subdir() {
+    let (_repo, repo_path) = common::local_git_repo_with_lib_subdir("mylib");
+    let json = format!(
+        r#"{{
+        "dependencies": [
+            {{"name": "subredir", "type": "git", "ref": "main", "url": "{}", "dir": "mylib"}}
+        ]
+    }}"#,
+        common::file_url(&repo_path)
+    );
+    let main = common::project_with_hmm_json(&json);
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(main.path())
+        .arg("install")
+        .assert()
+        .success();
+    let main_git = main.path().join(".haxelib/subredir/git");
+
+    let worktree = worktree_with_dev_redirect(&json, "subredir", &main_git.join("mylib"));
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(worktree.path())
+        .arg("check")
+        .assert()
+        .success();
+
+    let worktree = worktree_with_dev_redirect(&json, "subredir", &main_git);
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(worktree.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "not the checkout's 'mylib' subdir",
+        ));
+
+    std::fs::write(
+        main.path().join(".haxelib/subredir/.dev"),
+        main_git.to_str().unwrap(),
+    )
+    .unwrap();
+    Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(main.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "has a stale dev link outside its subdir 'mylib'",
+        ));
 }

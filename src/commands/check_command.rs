@@ -142,15 +142,20 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
         return Ok(check_dev_dependency(haxelib, &lib_path));
     }
 
+    // `haxelib path` resolves a lib with a `.dev` marker to that path, not to
+    // `.current`. A git worktree can point its libs at another checkout's
+    // `.haxelib` this way instead of installing them again.
+    let dev_path = super::dev_command::read_dev_file(&haxelib.name);
+    if let (HaxelibType::Haxelib, Some(dev)) = (&haxelib.haxelib_type, &dev_path) {
+        return Ok(check_haxelib_dev_redirect(haxelib, dev));
+    }
+
     // Read the .current file
-    let current_file = match lib_path.join(".dev").exists() {
-        true => lib_path.join(".dev"),
-        false => lib_path.join(".current"),
-    };
-    // println!("Checking version at {}", current_file.display());
     let mut current_version = String::new();
-    match File::open(&current_file) {
+    match File::open(lib_path.join(".current")) {
         Ok(mut f) => f.read_to_string(&mut current_version)?,
+        // a `.dev` marker stands in for `.current`
+        _ if dev_path.is_some() => 0,
         _ => {
             return Ok(HaxelibStatus::new(
                 haxelib,
@@ -188,7 +193,9 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
         HaxelibType::Git => {
             let repo_path = lib_path.join("git");
 
-            if !repo_path.exists() {
+            // With a `.dev` marker, the checkout it points into is the one
+            // that compiles; the lib's own git/ need not exist.
+            if dev_path.is_none() && !repo_path.exists() {
                 return Ok(HaxelibStatus::new(
                     haxelib,
                     InstallType::MissingGit,
@@ -197,8 +204,20 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
                 ));
             }
 
-            let repo = match gix::discover(&repo_path) {
+            let checkout = dev_path.as_deref().unwrap_or(&repo_path);
+            let repo = match gix::discover(checkout) {
                 Ok(r) => r,
+                Err(_) if dev_path.is_some() => {
+                    return Ok(HaxelibStatus::new(
+                        haxelib,
+                        InstallType::Outdated,
+                        get_wants(haxelib),
+                        Some(format!(
+                            "{} (.dev target is not a git checkout)",
+                            checkout.display()
+                        )),
+                    ));
+                }
                 Err(e) => {
                     println!("{}", e.to_string().red());
 
@@ -233,7 +252,16 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
                 None => Some("ref not found locally"),
             };
 
-            let has_local_changes = repo.is_dirty()?;
+            // A checkout elsewhere (reached through `.dev`) is never touched by
+            // install, which clones its own instead, so its local changes are
+            // its owner's business and can't conflict with an update.
+            let workdir = repo.workdir();
+            let is_own_checkout = workdir.is_some_and(|w| same_dir(w, &repo_path));
+            let has_local_changes = is_own_checkout && repo.is_dirty()?;
+            let via_dev = match is_own_checkout {
+                true => String::new(),
+                false => format!(", via .dev {}", checkout.display()),
+            };
 
             match (mismatch, has_local_changes) {
                 (Some(mismatch), true) => {
@@ -249,7 +277,7 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
                         haxelib,
                         InstallType::Outdated,
                         get_wants(haxelib),
-                        Some(format!("{} ({mismatch})", head_ref.id())),
+                        Some(format!("{} ({mismatch}{via_dev})", head_ref.id())),
                     ));
                 }
                 (None, true) => {
@@ -272,7 +300,7 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
             let current = std::fs::read_to_string(lib_path.join(".current"))
                 .map(|s| s.trim().to_string())
                 .unwrap_or_default();
-            if current != "git" {
+            if is_own_checkout && current != "git" {
                 return Ok(HaxelibStatus::new(
                     haxelib,
                     InstallType::Outdated,
@@ -291,29 +319,49 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
             // A git dep with a `dir` subdirectory needs a `.dev` link into that subdir.
             // If the repo is at the right commit but the link is missing, flag it so
             // install can (re)create it without a full re-clone.
-            let has_subdir = haxelib
+            let subdir = haxelib
                 .dir
                 .as_deref()
                 .map(str::trim)
-                .is_some_and(|d| !d.is_empty());
-            let has_dev_link = lib_path.join(".dev").exists();
-            if has_subdir && !has_dev_link {
-                return Ok(HaxelibStatus::new(
-                    haxelib,
-                    InstallType::MissingDevLink,
-                    get_wants(haxelib),
-                    None,
-                ));
-            }
-            // The reverse: `dir` was dropped (or the lib used to be a dev dep) but
-            // the `.dev` link remains, so `haxelib path` resolves away from git/.
-            if !has_subdir && has_dev_link {
-                return Ok(HaxelibStatus::new(
-                    haxelib,
-                    InstallType::StaleDevLink,
-                    get_wants(haxelib),
-                    None,
-                ));
+                .filter(|d| !d.is_empty());
+            // `haxelib path` resolves to the `.dev` target itself, so it must be
+            // the checkout's `dir`, or its root when there is none.
+            let dev_at_subdir = dev_path.as_deref().is_some_and(|dev| {
+                workdir.is_some_and(|w| same_dir(dev, &w.join(subdir.unwrap_or(""))))
+            });
+            match &dev_path {
+                None if subdir.is_some() => {
+                    return Ok(HaxelibStatus::new(
+                        haxelib,
+                        InstallType::MissingDevLink,
+                        get_wants(haxelib),
+                        None,
+                    ));
+                }
+                Some(dev) if !dev_at_subdir => {
+                    // In the lib's own checkout only the link is wrong (`dir`
+                    // was changed or dropped, or the lib used to be a dev dep),
+                    // so install rewrites or removes it without a re-clone.
+                    if is_own_checkout {
+                        return Ok(HaxelibStatus::new(
+                            haxelib,
+                            InstallType::StaleDevLink,
+                            get_wants(haxelib),
+                            None,
+                        ));
+                    }
+                    return Ok(HaxelibStatus::new(
+                        haxelib,
+                        InstallType::Outdated,
+                        get_wants(haxelib),
+                        Some(format!(
+                            "{} (.dev target is not the checkout's {})",
+                            dev.display(),
+                            subdir.map_or("root".to_string(), |d| format!("'{d}' subdir"))
+                        )),
+                    ));
+                }
+                _ => {}
             }
         }
         _ => {}
@@ -325,6 +373,39 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
         Some(current_version),
         None,
     ))
+}
+
+/// A haxelib dep with a `.dev` marker compiles against that path, at the
+/// version in its haxelib.json (what `haxelib path` reports as `-D name=version`).
+fn check_haxelib_dev_redirect<'a>(haxelib: &'a Haxelib, dev_path: &Path) -> HaxelibStatus<'a> {
+    let installed = std::fs::read_to_string(dev_path.join("haxelib.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|json| Some(json.get("version")?.as_str()?.to_string()));
+    match (&haxelib.version, installed) {
+        (None, installed) => HaxelibStatus::new(haxelib, InstallType::NotLocked, None, installed),
+        (Some(wants), Some(installed)) if *wants == installed => HaxelibStatus::new(
+            haxelib,
+            InstallType::AlreadyInstalled,
+            Some(installed),
+            None,
+        ),
+        (Some(_), installed) => HaxelibStatus::new(
+            haxelib,
+            InstallType::Outdated,
+            get_wants(haxelib),
+            Some(format!(
+                "{} (via .dev {})",
+                installed.as_deref().unwrap_or("no haxelib.json version"),
+                dev_path.display()
+            )),
+        ),
+    }
+}
+
+/// Whether two paths name the same existing directory.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
 }
 
 /// A dev dep is installed when its `.dev` marker points at the hmm.json `path`.
@@ -395,10 +476,14 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             );
         }
         InstallType::StaleDevLink => {
+            let detail = match haxelib_status.lib.dir.as_deref().map(str::trim) {
+                Some(dir) if !dir.is_empty() => format!("outside its subdir '{dir}'"),
+                _ => "but no subdir configured".to_string(),
+            };
             println!(
                 "{} {}",
                 haxelib_status.lib.name.yellow().bold(),
-                "has a stale dev link but no subdir configured".yellow()
+                format!("has a stale dev link {detail}").yellow()
             );
         }
         InstallType::Outdated => {

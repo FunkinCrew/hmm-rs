@@ -35,6 +35,16 @@ pub fn remove_dev_file(name: &str) -> Result<bool> {
     }
 }
 
+/// Reads the `.dev` marker for library `name`: the path `haxelib path` resolves
+/// the lib to in place of `.current`. Kept as written, so a relative path
+/// resolves against the cwd, as it does for the compiler. `None` when there is
+/// no marker or it is blank.
+pub fn read_dev_file(name: &str) -> Option<PathBuf> {
+    let content = fs::read_to_string(lib_dir_path_for_name(name).join(".dev")).ok()?;
+    let content = content.trim();
+    (!content.is_empty()).then(|| PathBuf::from(content))
+}
+
 /// Resolves a dev dependency's hmm.json `path` to the absolute path its `.dev`
 /// marker should hold. Relative paths resolve against the cwd, as they do for
 /// `hmm-rs dev`.
