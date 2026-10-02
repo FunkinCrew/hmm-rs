@@ -120,6 +120,42 @@ fn check_filtered_only_processes_named_libs() {
         .stdout(predicate::str::contains("Checking lib-c").not());
 }
 
+/// Libs are checked on worker threads but reported in hmm.json order.
+#[test]
+fn check_reports_libs_in_hmm_json_order() {
+    let names: Vec<String> = (0..24).map(|i| format!("order-{i:02}")).collect();
+    let deps: Vec<String> = names
+        .iter()
+        .map(|n| format!(r#"{{"name": "{n}", "type": "haxelib", "version": "1.0.0"}}"#))
+        .collect();
+    let json = format!(r#"{{"dependencies": [{}]}}"#, deps.join(","));
+    // every other lib installed; quiet mode then names only the missing ones
+    let installed: Vec<(&str, &str)> = names
+        .iter()
+        .step_by(2)
+        .map(|n| (n.as_str(), "1.0.0"))
+        .collect();
+    let temp = common::project_with_installed_haxelibs(&json, &installed);
+
+    let output = Command::cargo_bin("hmm-rs")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output).unwrap();
+    let positions: Vec<usize> = names
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .map(|n| stdout.find(n.as_str()).expect(n))
+        .collect();
+    assert!(positions.is_sorted(), "out of order:\n{stdout}");
+}
+
 #[test]
 fn check_default_hides_correct_libs() {
     let json = r#"{

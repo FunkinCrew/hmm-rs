@@ -6,7 +6,11 @@ use anyhow::{anyhow, Context, Result};
 use console::Emoji;
 use owo_colors::OwoColorize;
 use std::io::Read;
+use std::num::NonZeroUsize;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
+use std::thread;
 
 pub struct HaxelibStatus<'a> {
     pub lib: &'a Haxelib,
@@ -89,41 +93,73 @@ pub fn compare_haxelib_to_hmm<'a>(
     haxelibs: &[&'a Haxelib],
     verbose: bool,
 ) -> Result<Vec<HaxelibStatus<'a>>> {
-    let mut install_status = Vec::new();
+    // Libs are checked on worker threads; results are printed here, in
+    // hmm.json order, as soon as every lib before them is done.
+    let workers = thread::available_parallelism()
+        .map_or(1, NonZeroUsize::get)
+        .min(haxelibs.len());
+    let next = AtomicUsize::new(0);
+    let (tx, rx) = mpsc::channel();
 
-    for &haxelib in haxelibs {
-        if verbose {
-            // transient progress line, cleared once the check below completes
-            println!(
-                "Checking {} {}",
-                haxelib.name.bold().yellow(),
-                Emoji("🤔", "[...]")
-            );
+    thread::scope(|s| {
+        for _ in 0..workers {
+            let (tx, next) = (tx.clone(), &next);
+            s.spawn(move || loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                let Some(&haxelib) = haxelibs.get(i) else {
+                    break;
+                };
+                // One lib that can't be checked must not hide the state of the others.
+                let haxelib_status = check_dependency(haxelib).unwrap_or_else(|e| {
+                    HaxelibStatus::new(
+                        haxelib,
+                        InstallType::CheckFailed(format!("{e:#}")),
+                        get_wants(haxelib),
+                        None,
+                    )
+                });
+                if tx.send((i, haxelib_status)).is_err() {
+                    break;
+                }
+            });
+        }
+        drop(tx);
+
+        let mut done: Vec<Option<HaxelibStatus>> = haxelibs.iter().map(|_| None).collect();
+        let mut install_status = Vec::new();
+
+        for (i, haxelib) in haxelibs.iter().enumerate() {
+            if verbose {
+                // transient progress line, cleared once the check below completes
+                println!(
+                    "Checking {} {}",
+                    haxelib.name.bold().yellow(),
+                    Emoji("🤔", "[...]")
+                );
+            }
+
+            let haxelib_status = loop {
+                if let Some(status) = done[i].take() {
+                    break status;
+                }
+                let (j, status) = rx.recv()?;
+                done[j] = Some(status);
+            };
+
+            if verbose {
+                // clear the "Checking ..." progress line, then show the result
+                print!("\x1B[1A\x1B[2K");
+                print_install_status(&haxelib_status)?;
+            } else if haxelib_status.install_type != InstallType::AlreadyInstalled {
+                // quiet mode: only report libs that need attention
+                print_install_status(&haxelib_status)?;
+            }
+
+            install_status.push(haxelib_status);
         }
 
-        // One lib that can't be checked must not hide the state of the others.
-        let haxelib_status = check_dependency(haxelib).unwrap_or_else(|e| {
-            HaxelibStatus::new(
-                haxelib,
-                InstallType::CheckFailed(format!("{e:#}")),
-                get_wants(haxelib),
-                None,
-            )
-        });
-
-        if verbose {
-            // clear the "Checking ..." progress line, then show the result
-            print!("\x1B[1A\x1B[2K");
-            print_install_status(&haxelib_status)?;
-        } else if haxelib_status.install_type != InstallType::AlreadyInstalled {
-            // quiet mode: only report libs that need attention
-            print_install_status(&haxelib_status)?;
-        }
-
-        install_status.push(haxelib_status);
-    }
-
-    Ok(install_status)
+        Ok(install_status)
+    })
 }
 
 fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
@@ -218,14 +254,14 @@ fn check_dependency(haxelib: &Haxelib) -> Result<HaxelibStatus<'_>> {
                         )),
                     ));
                 }
+                // Reported with the status, not printed here: this runs on a
+                // worker thread, so a print would land out of order.
                 Err(e) => {
-                    println!("{}", e.to_string().red());
-
                     return Ok(HaxelibStatus::new(
                         haxelib,
                         InstallType::Missing,
                         get_wants(haxelib),
-                        None,
+                        Some(format!("None ({e})")),
                     ));
                 }
             };
@@ -449,7 +485,7 @@ fn print_install_status(haxelib_status: &HaxelibStatus) -> Result<()> {
             println!(
                 "Expected: {} | Installed: {}",
                 haxelib_status.wants.as_deref().unwrap_or("unknown").red(),
-                "None".red()
+                haxelib_status.installed.as_deref().unwrap_or("None").red()
             );
         }
         InstallType::MissingGit => {
