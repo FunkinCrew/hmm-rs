@@ -1,6 +1,7 @@
 mod add;
 mod check;
 mod clean;
+mod completions;
 mod dev;
 mod git;
 mod haxelib;

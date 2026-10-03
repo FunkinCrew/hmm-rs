@@ -13,6 +13,16 @@ or directly from git:
 
 `cargo install --git https://github.com/ninjamuffin99/hmm-rs hmm-rs`
 
+# Shell completions
+
+`hmm-rs completions <shell>` prints a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. For fish:
+
+```sh
+hmm-rs completions fish > ~/.config/fish/completions/hmm-rs.fish
+```
+
+Run it again after upgrading `hmm-rs`, so the script picks up new commands and options.
+
 # Development
 
 ```sh

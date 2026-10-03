@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Ok, Result};
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use shadow_rs::shadow;
 
 use crate::commands::add_command;
@@ -128,6 +128,11 @@ enum Commands {
 
         #[command(flatten)]
         filter: LibraryFilter,
+    },
+    /// Prints a shell completion script to stdout
+    Completions {
+        /// The shell to generate the script for
+        shell: clap_complete::Shell,
     },
 }
 
@@ -250,12 +255,16 @@ pub fn run() -> Result<()> {
                 short_id,
             )?,
         },
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+        }
     }
     Ok(())
 }
 
 #[test]
 fn verify_cli() {
-    use clap::CommandFactory;
     Cli::command().debug_assert();
 }
