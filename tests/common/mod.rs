@@ -74,10 +74,17 @@ pub fn sample_fixture_content(name: &str) -> String {
     std::fs::read_to_string(get_samples_dir().join(name)).unwrap()
 }
 
+/// Runs git in `repo` with a fixed identity, so commits and annotated tags work
+/// in any repo (including hmm-rs's own clones) on a machine with no git
+/// `user.name`/`user.email` configured, such as a CI runner.
 pub fn run_git(repo: &std::path::Path, args: &[&str]) {
     let status = std::process::Command::new("git")
         .args(["-C", repo.to_str().unwrap()])
         .args(args)
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
         .status()
         .unwrap();
     assert!(status.success(), "git {:?} failed", args);
@@ -105,8 +112,6 @@ pub fn local_git_repo_with_lib_subdir(subdir: &str) -> (TempDir, PathBuf) {
     .unwrap();
 
     run_git(&repo_path, &["init", "-q", "-b", "main"]);
-    run_git(&repo_path, &["config", "user.email", "test@example.com"]);
-    run_git(&repo_path, &["config", "user.name", "test"]);
     run_git(&repo_path, &["add", "-A"]);
     run_git(&repo_path, &["commit", "-qm", "init"]);
     (temp, repo_path)
