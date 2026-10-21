@@ -24,7 +24,8 @@ fn remove_drops_entry_from_hmm_json() {
             {"name": "lib-b", "type": "haxelib", "version": "2.0.0"}
         ]
     }"#;
-    let temp = common::project_with_installed_haxelibs(json, &[("lib-a", "1.0.0"), ("lib-b", "2.0.0")]);
+    let temp =
+        common::project_with_installed_haxelibs(json, &[("lib-a", "1.0.0"), ("lib-b", "2.0.0")]);
 
     Command::cargo_bin("hmm-rs")
         .unwrap()
@@ -138,8 +139,10 @@ fn remove_dotted_name_deletes_comma_dir() {
             {"name": "keep-lib", "type": "haxelib", "version": "2.0.0"}
         ]
     }"#;
-    let temp =
-        common::project_with_installed_haxelibs(json, &[("rmdot.vis", "1.0.0"), ("keep-lib", "2.0.0")]);
+    let temp = common::project_with_installed_haxelibs(
+        json,
+        &[("rmdot.vis", "1.0.0"), ("keep-lib", "2.0.0")],
+    );
 
     Command::cargo_bin("hmm-rs")
         .unwrap()
@@ -169,7 +172,9 @@ fn remove_mixed_case_lib_leaves_no_dir_or_link() {
         ]
     }"#;
     let temp = common::project_with_hmm_json(json);
-    temp.child(".haxelib/RmOld/.current").write_str("1.0.0").unwrap();
+    temp.child(".haxelib/RmOld/.current")
+        .write_str("1.0.0")
+        .unwrap();
     temp.child("src").create_dir_all().unwrap();
     Command::cargo_bin("hmm-rs")
         .unwrap()

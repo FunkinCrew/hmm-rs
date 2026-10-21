@@ -89,7 +89,11 @@ fn git_existing_entry_warns_and_replaces() {
         .stdout(predicate::str::contains("already exists in hmm.json"));
 
     let deps = hmm_rs::hmm::json::read_json(&temp.path().join("hmm.json")).unwrap();
-    assert_eq!(deps.dependencies.len(), 1, "entry should be replaced, not duplicated");
+    assert_eq!(
+        deps.dependencies.len(),
+        1,
+        "entry should be replaced, not duplicated"
+    );
     assert_eq!(
         deps.dependencies[0].haxelib_type,
         hmm_rs::hmm::haxelib::HaxelibType::Git

@@ -420,7 +420,13 @@ mod tests {
 
     #[test]
     fn test_download_url_haxelib() {
-        let h = make_haxelib("flixel-addons", HaxelibType::Haxelib, Some("3.3.0"), None, None);
+        let h = make_haxelib(
+            "flixel-addons",
+            HaxelibType::Haxelib,
+            Some("3.3.0"),
+            None,
+            None,
+        );
         assert_eq!(
             h.download_url().unwrap(),
             "https://lib.haxe.org/p/flixel-addons/3.3.0/download"
@@ -433,7 +439,13 @@ mod tests {
         // name and version (it redirects to the comma-encoded
         // files/3.0/<safe(name)>-<safe(ver)>.zip itself). Do not "fix" this to
         // the comma form.
-        let h = make_haxelib("funkin.vis", HaxelibType::Haxelib, Some("1.0.0"), None, None);
+        let h = make_haxelib(
+            "funkin.vis",
+            HaxelibType::Haxelib,
+            Some("1.0.0"),
+            None,
+            None,
+        );
         assert_eq!(
             h.download_url().unwrap(),
             "https://lib.haxe.org/p/funkin.vis/1.0.0/download"
@@ -465,7 +477,13 @@ mod tests {
 
     #[test]
     fn test_version_or_ref_haxelib() {
-        let h = make_haxelib("flixel-addons", HaxelibType::Haxelib, Some("3.3.0"), None, None);
+        let h = make_haxelib(
+            "flixel-addons",
+            HaxelibType::Haxelib,
+            Some("3.3.0"),
+            None,
+            None,
+        );
         assert_eq!(h.version_or_ref().unwrap(), "3.3.0");
     }
 
@@ -503,7 +521,13 @@ mod tests {
 
     #[test]
     fn test_try_url_some() {
-        let h = make_haxelib("x", HaxelibType::Git, None, None, Some("https://example.com"));
+        let h = make_haxelib(
+            "x",
+            HaxelibType::Git,
+            None,
+            None,
+            Some("https://example.com"),
+        );
         assert_eq!(h.try_url(), Some("https://example.com"));
     }
 
@@ -571,7 +595,16 @@ mod tests {
         // Real haxelib's Data.safe allows only [A-Za-z0-9_.-]; anything else
         // throws "Invalid parameter" in `haxelib path`, so hmm-rs rejects it
         // up front.
-        for name in ["a b", "a@b", "a:b", "a#b", "a%b", "a*b", "a?b", "\u{e9}clair"] {
+        for name in [
+            "a b",
+            "a@b",
+            "a:b",
+            "a#b",
+            "a%b",
+            "a*b",
+            "a?b",
+            "\u{e9}clair",
+        ] {
             assert!(
                 validate_lib_name(name).is_err(),
                 "{name:?} should be rejected"
@@ -584,10 +617,7 @@ mod tests {
         for name in ["flixel", "funkin.vis", "..", ".", "-x"] {
             if validate_lib_name(name).is_ok() {
                 let path = lib_dir_path_for_name(name);
-                assert!(
-                    path.starts_with(".haxelib"),
-                    "{name:?} escaped to {path:?}"
-                );
+                assert!(path.starts_with(".haxelib"), "{name:?} escaped to {path:?}");
                 assert_eq!(path.components().count(), 2, "{name:?} -> {path:?}");
             }
         }

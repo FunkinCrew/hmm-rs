@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
-use std::path::Path;
 use owo_colors::OwoColorize;
+use std::path::Path;
 
 pub fn remove_haxelib_folder() -> Result<()> {
     remove_haxelib_folder_at(Path::new("."))

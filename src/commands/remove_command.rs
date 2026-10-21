@@ -9,11 +9,7 @@ use crate::hmm::{
     json,
 };
 
-pub fn remove_haxelibs(
-    deps: Dependancies,
-    names: &[String],
-    json_path: PathBuf,
-) -> Result<()> {
+pub fn remove_haxelibs(deps: Dependancies, names: &[String], json_path: PathBuf) -> Result<()> {
     if names.is_empty() {
         return Err(anyhow!("'remove' requires at least one library name"));
     }

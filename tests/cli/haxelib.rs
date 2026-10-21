@@ -46,7 +46,9 @@ fn haxelib_without_version_queries_latest() {
         .args(["haxelib", "regstub-b"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Latest version of regstub-b is 2.0.0"));
+        .stdout(predicate::str::contains(
+            "Latest version of regstub-b is 2.0.0",
+        ));
 
     let current =
         std::fs::read_to_string(temp.child(".haxelib/regstub-b/.current").path()).unwrap();
@@ -72,7 +74,9 @@ fn haxelib_without_version_prefers_newest_stable_over_newer_prerelease() {
         .args(["haxelib", "regstub-pre"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Latest version of regstub-pre is 2.0.0"));
+        .stdout(predicate::str::contains(
+            "Latest version of regstub-pre is 2.0.0",
+        ));
 
     let current =
         std::fs::read_to_string(temp.child(".haxelib/regstub-pre/.current").path()).unwrap();

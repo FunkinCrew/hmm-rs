@@ -20,7 +20,10 @@ pub fn parse_spec(spec: &str) -> Result<(&str, Option<&str>)> {
                 return Err(anyhow!("invalid spec '{}': missing library name", spec));
             }
             if version.is_empty() {
-                return Err(anyhow!("invalid spec '{}': missing version after '@'", spec));
+                return Err(anyhow!(
+                    "invalid spec '{}': missing version after '@'",
+                    spec
+                ));
             }
             Ok((name, Some(version)))
         }
@@ -418,7 +421,10 @@ mod tests {
     fn parse_infos_versions_long_non_ascii_does_not_panic() {
         // `€` is 3 bytes, so byte 200 lands mid-character.
         let resp = "€".repeat(300);
-        assert!(!resp.is_char_boundary(200), "test input must straddle byte 200");
+        assert!(
+            !resp.is_char_boundary(200),
+            "test input must straddle byte 200"
+        );
         assert!(parse_infos_versions(&resp, "lime").is_err());
     }
 

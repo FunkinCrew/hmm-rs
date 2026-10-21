@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use assert_fs::TempDir;
 use assert_fs::prelude::*;
+use assert_fs::TempDir;
 
 pub fn get_samples_dir() -> PathBuf {
     let crate_dir = PathBuf::new().join(env!("CARGO_MANIFEST_DIR"));

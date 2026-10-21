@@ -99,7 +99,9 @@ fn test_hmm_json_read_version_null() {
 
 #[test]
 fn test_hmm_json_read_dev() {
-    let dev_json = PathBuf::new().join(common::get_samples_dir()).join("dev.json");
+    let dev_json = PathBuf::new()
+        .join(common::get_samples_dir())
+        .join("dev.json");
     let deps = hmm::json::read_json(&dev_json).unwrap();
 
     assert_eq!(deps.dependencies.len(), 1);
@@ -188,7 +190,11 @@ fn test_save_json_preserves_order() {
     hmm::json::save_json(deps, json_path.clone()).unwrap();
 
     let read_back = hmm::json::read_json(&json_path).unwrap();
-    let names: Vec<&str> = read_back.dependencies.iter().map(|d| d.name.as_str()).collect();
+    let names: Vec<&str> = read_back
+        .dependencies
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect();
     assert_eq!(names, vec!["zeta", "Alpha", "beta"]);
     let text = std::fs::read_to_string(&json_path).unwrap();
     assert!(text.ends_with("}\n"), "save_json should end with a newline");
@@ -227,7 +233,12 @@ fn write_fixture(content: &str) -> (assert_fs::TempDir, PathBuf) {
     (tmp, json_path)
 }
 
-fn git_dep(name: &str, url: &str, vcs_ref: &str, dir: Option<&str>) -> hmm_rs::hmm::haxelib::Haxelib {
+fn git_dep(
+    name: &str,
+    url: &str,
+    vcs_ref: &str,
+    dir: Option<&str>,
+) -> hmm_rs::hmm::haxelib::Haxelib {
     hmm_rs::hmm::haxelib::Haxelib {
         name: name.to_string(),
         haxelib_type: HaxelibType::Git,
@@ -320,7 +331,11 @@ fn test_upsert_preserves_missing_trailing_newline() {
     hmm::json::upsert_dependencies(&json_path, &[haxelib_dep("mid", "2.0.0")]).unwrap();
 
     let text = std::fs::read_to_string(&json_path).unwrap();
-    assert!(text.ends_with('}'), "got trailing: {:?}", &text[text.len() - 4..]);
+    assert!(
+        text.ends_with('}'),
+        "got trailing: {:?}",
+        &text[text.len() - 4..]
+    );
     assert!(text.contains("\"name\": \"mid\""));
 }
 

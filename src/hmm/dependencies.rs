@@ -71,8 +71,11 @@ impl Dependancies {
                 }
             }
             HaxelibType::Haxelib => {
-                let haxelib_url =
-                    format!("{}/p/{}", crate::hmm::haxelib::registry_base_url(), lib.name);
+                let haxelib_url = format!(
+                    "{}/p/{}",
+                    crate::hmm::haxelib::registry_base_url(),
+                    lib.name
+                );
                 haxelib_output.push_str(&format!("url: {}\n", haxelib_url))
             }
             _ => {}

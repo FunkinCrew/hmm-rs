@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
-use self_update::cargo_crate_version;
 use self_update::backends::github;
+use self_update::cargo_crate_version;
 
 const REPO_OWNER: &str = "FunkinCrew";
 const REPO_NAME: &str = "hmm-rs";
@@ -45,10 +45,7 @@ fn check_for_update(current: &str) -> Result<()> {
             latest_version,
             current
         );
-        println!(
-            "Run {} to install it.",
-            "hmm-rs upgrade".cyan().bold()
-        );
+        println!("Run {} to install it.", "hmm-rs upgrade".cyan().bold());
     } else {
         println!(
             "{} v{} is the latest version.",

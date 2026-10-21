@@ -11,16 +11,12 @@ fn add_git_with_multiple_names_errors() {
     Command::cargo_bin("hmm-rs")
         .unwrap()
         .current_dir(temp.path())
-        .args([
-            "add",
-            "lib-a",
-            "lib-b",
-            "--git",
-            "https://example.com/repo",
-        ])
+        .args(["add", "lib-a", "lib-b", "--git", "https://example.com/repo"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("--git installs accept exactly one"));
+        .stderr(predicate::str::contains(
+            "--git installs accept exactly one",
+        ));
 }
 
 #[test]
