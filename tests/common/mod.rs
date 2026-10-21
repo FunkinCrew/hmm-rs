@@ -119,7 +119,7 @@ pub fn local_git_repo_with_lib_subdir(subdir: &str) -> (TempDir, PathBuf) {
 
 /// Returns a `file://` clone URL for a local repo path.
 pub fn file_url(path: &std::path::Path) -> String {
-    format!("file://{}", path.to_str().unwrap())
+    url::Url::from_file_path(path).unwrap().to_string()
 }
 
 /// A local HTTP stub of the lib.haxe.org registry for hermetic haxelib-install
