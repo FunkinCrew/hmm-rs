@@ -79,7 +79,9 @@ fn dev_fails_with_nonexistent_path() {
         .args(["dev", "my-lib", "/nonexistent/path/to/lib"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("No such file"));
+        .stderr(predicate::str::contains(
+            r#"dev path "/nonexistent/path/to/lib" not found"#,
+        ));
 }
 
 #[test]

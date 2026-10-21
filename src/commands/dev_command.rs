@@ -74,7 +74,8 @@ pub fn add_dev_dependency(name: &str, path: &str, json_path: PathBuf) -> Result<
     hmm::haxelib::validate_lib_name(name)?;
 
     // Convert to absolute path
-    let absolute_path = dunce::canonicalize(path)?;
+    let absolute_path =
+        dunce::canonicalize(path).with_context(|| format!("dev path {path:?} not found"))?;
 
     let dev_haxelib = Haxelib {
         name: name.to_string(),

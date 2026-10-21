@@ -22,7 +22,7 @@ fn git_install_with_subdir_creates_dev_file() {
 
     let dev_content = std::fs::read_to_string(dev_file.path()).unwrap();
     assert!(
-        dev_content.contains("git/mylib"),
+        dev_content.replace('\\', "/").contains("git/mylib"),
         "dev file should point into git/mylib subdir, got: {dev_content}"
     );
     assert!(!dev_content.starts_with(r"\\?\"), "got: {dev_content}");
@@ -170,7 +170,7 @@ fn install_from_hmm_json_with_subdir_creates_dev_file() {
 
     let dev_content = std::fs::read_to_string(dev_file.path()).unwrap();
     assert!(
-        dev_content.contains("git/mylib"),
+        dev_content.replace('\\', "/").contains("git/mylib"),
         "dev file should point into git/mylib subdir, got: {dev_content}"
     );
 }
@@ -223,7 +223,7 @@ fn install_relinks_missing_dev_file_for_subdir_git() {
         .success();
     dev_file.assert(predicate::path::is_file());
     let dev_content = std::fs::read_to_string(dev_file.path()).unwrap();
-    assert!(dev_content.contains("git/mylib"));
+    assert!(dev_content.replace('\\', "/").contains("git/mylib"));
 }
 
 // --- dotted library names (`funkin.vis`-style) ---
