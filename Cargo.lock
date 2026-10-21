@@ -2149,6 +2149,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "console",
+ "dunce",
  "futures",
  "futures-util",
  "gix",

@@ -45,10 +45,11 @@ fn dev_with_dotted_name_converts_to_commas() {
         .assert(predicate::path::is_file());
 }
 
-/// Pins the exact `.dev` file format: the canonicalized absolute path, no
-/// trailing newline. Divergence from real haxelib (documented, intentional for
-/// now): haxelib normalizes with a trailing slash; both agree on no newline,
-/// and haxelib re-normalizes on read so the missing slash is tolerated.
+/// Pins the exact `.dev` file format: the canonicalized absolute path, without
+/// Windows' verbatim `\\?\` prefix, no trailing newline. Divergence from real
+/// haxelib (documented, intentional for now): haxelib normalizes with a
+/// trailing slash; both agree on no newline, and haxelib re-normalizes on read
+/// so the missing slash is tolerated.
 #[test]
 fn dev_file_contains_exact_absolute_path() {
     let temp = common::initialized_project();
@@ -62,9 +63,10 @@ fn dev_file_contains_exact_absolute_path() {
         .assert()
         .success();
 
-    let expected = std::fs::canonicalize(source_dir.path()).unwrap();
+    let expected = dunce::canonicalize(source_dir.path()).unwrap();
     let dev_content = std::fs::read_to_string(temp.child(".haxelib/my-lib/.dev").path()).unwrap();
     assert_eq!(dev_content, expected.to_string_lossy());
+    assert!(!dev_content.starts_with(r"\\?\"), "got: {dev_content}");
 }
 
 #[test]

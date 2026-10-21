@@ -15,6 +15,8 @@ use crate::hmm::{
 /// Creates the lib dir if needed (see `haxelib::ensure_lib_dir`) and writes
 /// `.haxelib/<name-with-commas>/.dev` containing the given path. `absolute_path`
 /// is expected to already be absolute (callers canonicalize before calling).
+/// Callers use `dunce::canonicalize`: on Windows `std::fs::canonicalize`
+/// returns a verbatim `\\?\C:\...` path, which libs reading `.dev` choke on.
 pub fn write_dev_file(name: &str, absolute_path: &Path) -> Result<()> {
     super::init_command::ensure_haxelib_folder()?;
     let lib_dir = hmm::haxelib::ensure_lib_dir(name)?;
@@ -53,9 +55,7 @@ pub fn resolve_dev_path(haxelib: &Haxelib) -> Result<PathBuf> {
         .path
         .as_deref()
         .ok_or_else(|| anyhow!("{}: 'path' field is required for dev type", haxelib.name))?;
-    Path::new(path)
-        .canonicalize()
-        .with_context(|| format!("dev path {path:?} not found"))
+    dunce::canonicalize(path).with_context(|| format!("dev path {path:?} not found"))
 }
 
 /// Installs a dev dependency from hmm.json by pointing its `.dev` marker at `path`.
@@ -74,7 +74,7 @@ pub fn add_dev_dependency(name: &str, path: &str, json_path: PathBuf) -> Result<
     hmm::haxelib::validate_lib_name(name)?;
 
     // Convert to absolute path
-    let absolute_path = Path::new(path).canonicalize()?;
+    let absolute_path = dunce::canonicalize(path)?;
 
     let dev_haxelib = Haxelib {
         name: name.to_string(),

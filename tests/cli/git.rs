@@ -25,6 +25,7 @@ fn git_install_with_subdir_creates_dev_file() {
         dev_content.contains("git/mylib"),
         "dev file should point into git/mylib subdir, got: {dev_content}"
     );
+    assert!(!dev_content.starts_with(r"\\?\"), "got: {dev_content}");
 
     let json_content = std::fs::read_to_string(temp.child("hmm.json").path()).unwrap();
     assert!(json_content.contains("\"dir\": \"mylib\""));

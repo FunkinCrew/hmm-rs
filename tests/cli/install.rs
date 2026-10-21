@@ -775,7 +775,7 @@ fn install_dev_dep_writes_dev_marker() {
     }"#;
     let temp = common::project_with_hmm_json(json);
     temp.child("devsrc").create_dir_all().unwrap();
-    let target = temp.child("devsrc").path().canonicalize().unwrap();
+    let target = dunce::canonicalize(temp.child("devsrc").path()).unwrap();
 
     Command::cargo_bin("hmm-rs")
         .unwrap()
@@ -812,7 +812,7 @@ fn install_dev_dep_repoints_stale_marker_and_haxelib_install() {
     temp.child(".haxelib/devinst-b/.dev")
         .write_str("/somewhere/else")
         .unwrap();
-    let target = temp.child("devsrc").path().canonicalize().unwrap();
+    let target = dunce::canonicalize(temp.child("devsrc").path()).unwrap();
 
     Command::cargo_bin("hmm-rs")
         .unwrap()

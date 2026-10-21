@@ -1403,7 +1403,7 @@ pub fn ensure_git_subdir_dev_link(haxelib: &Haxelib) -> Result<()> {
         }
     };
 
-    let abs_git = std::fs::canonicalize(haxelib.git_repo_path())
+    let abs_git = dunce::canonicalize(haxelib.git_repo_path())
         .with_context(|| format!("Failed to resolve git repo path for {}", haxelib.name))?;
     let abs_subdir = abs_git.join(subdir);
 

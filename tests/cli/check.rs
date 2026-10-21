@@ -538,7 +538,7 @@ fn dev_project() -> (assert_fs::TempDir, std::path::PathBuf) {
     let temp = common::project_with_hmm_json(json);
     temp.child("devsrc").create_dir_all().unwrap();
     temp.child(".haxelib/devlib").create_dir_all().unwrap();
-    let target = temp.child("devsrc").path().canonicalize().unwrap();
+    let target = dunce::canonicalize(temp.child("devsrc").path()).unwrap();
     (temp, target)
 }
 
